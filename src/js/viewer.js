@@ -736,6 +736,18 @@
         st.crop.rotating = true;
         return;
       }
+      if (st.colorPick) {
+        // one click to take a colour from the photo (a mask's colour range)
+        const cb = st.colorPick; st.colorPick = null; root.classList.remove('cur-picker');
+        const c = await E.sampleAt(st.photo, st.photo.settings, fo[0], fo[1], 4);
+        if (c) {
+          const g = (v) => { v = Math.max(0, Math.min(1, v)); return v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
+          const hs = [0, 0]; P.hueSat(g(c[0]), g(c[1]), g(c[2]), hs);
+          if (hs[1] < 0.06) PJ.UI.toast('That spot is close to grey: pick somewhere with more colour', 'circle-info');
+          else cb(Math.round(hs[0] * 360));
+        }
+        return;
+      }
       if (st.tool === 'wb') {
         const s = await E.sampleAt(st.photo, st.photo.settings, fo[0], fo[1], 3);
         if (s) {
@@ -1254,6 +1266,8 @@
       startMask(type) { st.maskCreate = type; if (st.tool !== 'mask') api.setTool('mask'); setCursor(); events.emit('masks'); },
       selectMask(i) { st.maskIdx = i; update('commit'); events.emit('masks'); },
       setMaskOverlay(b) { st.maskOverlay = b; update('commit'); },
+      /** The next click on the photo hands its hue (0…360) to cb. */
+      pickColor(cb) { st.colorPick = cb; root.classList.add('cur-picker'); PJ.UI.toast('Click the colour in the photo', 'eye-dropper'); },
       activeMask,
       foDims, fullDims, panes, mainPane, toFo, toScreen,
       setCenter(c) { st.center = c; st.tile = null; draw(); scheduleTile(); },

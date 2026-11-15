@@ -737,8 +737,41 @@
     return { grid, gw, gh, G };
   }
 
-  /** Weight [0..1] per output pixel. SX/SY are source px coords; Y0 = gamma luma for range masks. */
-  function maskWeights(mask, SX, SY, Y0, N, W, H) {
+  /** Hue (0…1) and saturation (0…1) of a gamma-encoded colour, written to out[0], out[1]. */
+  function hueSat(r, g, b, out) {
+    const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b), c = mx - mn;
+    let hh = 0;
+    if (c > 1e-6) {
+      if (mx === r) hh = ((g - b) / c) % 6; else if (mx === g) hh = (b - r) / c + 2; else hh = (r - g) / c + 4;
+      hh /= 6; if (hh < 0) hh += 1;
+    }
+    out[0] = hh; out[1] = mx > 1e-4 ? c / mx : 0;
+  }
+
+  /**
+   * Weight [0..1] per output pixel: the mask's own shape, narrowed by the mask it is combined with
+   * (intersect: only where both are; subtract: not where the other is), times its amount.
+   * SX/SY are source px coords; Y0 = gamma luma and C0 = { h, s } hue and saturation, for range limits.
+   */
+  function maskWeights(mask, SX, SY, Y0, N, W, H, C0, all) {
+    const out = maskShape(mask, SX, SY, Y0, N, W, H, C0);
+    const lim = mask.limit && all ? all.find(m => m.id === mask.limit.id && m !== mask) : null;
+    if (lim) {
+      const o = maskShape(lim, SX, SY, Y0, N, W, H, C0);
+      if (mask.limit.mode === 'subtract') for (let i = 0; i < N; i++) out[i] *= 1 - o[i];
+      else for (let i = 0; i < N; i++) out[i] *= o[i];
+    }
+    const amt = (mask.amount ?? 100) / 100;
+    if (amt !== 1) for (let i = 0; i < N; i++) out[i] *= amt;
+    return out;
+  }
+  /** True when a mask, or the mask it is combined with, is limited to a colour. */
+  function masksNeedColor(masks, all) {
+    return masks.some(m => m.colOn || (m.limit && (all || masks).some(o => o.id === m.limit.id && o.colOn)));
+  }
+
+  /** A mask's shape with its invert, luminance range and colour range — before combining and amount. */
+  function maskShape(mask, SX, SY, Y0, N, W, H, C0) {
     const L = Math.max(W, H);
     const out = new Float32Array(N);
     if (mask.type === 'linear') {
@@ -780,8 +813,16 @@
         out[i] *= smoothstep(lo - sm, lo + 1e-4, y) * (1 - smoothstep(hi - 1e-4, hi + sm, y));
       }
     }
-    const amt = (mask.amount ?? 100) / 100;
-    if (amt !== 1) for (let i = 0; i < N; i++) out[i] *= amt;
+    // Colour range refinement: only pixels whose hue is near the chosen one (greys have no hue: left out)
+    if (mask.colOn && C0) {
+      const hue = ((mask.colHue ?? 0) % 360) / 360, tol = clamp((mask.colRange ?? 30) / 360, 0.005, 0.5), soft = Math.max(0.02, tol * 0.5);
+      const Hh = C0.h, Ss = C0.s;
+      for (let i = 0; i < N; i++) {
+        if (out[i] <= 0) continue;
+        let d = Hh[i] - hue; d -= Math.floor(d + 0.5); if (d < 0) d = -d;
+        out[i] *= (1 - smoothstep(tol, tol + soft, d)) * smoothstep(0.04, 0.12, Ss[i]);
+      }
+    }
     return out;
   }
 
@@ -1361,15 +1402,20 @@
     if (det.nrLuma > 0 || det.nrColor > 0) stageNoise(R, G, B, w, h, N, det, rs);
 
     // 3. Mask weights
-    let Y0 = null;
+    let Y0 = null, C0 = null;
     const maskW = [], maskAdj = [];
     if (needCoords) {
       Y0 = new Float32Array(N);
       for (let i = 0; i < N; i++) Y0[i] = 0.2126 * R[i] + 0.7152 * G[i] + 0.0722 * B[i];
+      if (masksNeedColor(s.masks, s.masks)) {
+        C0 = { h: new Float32Array(N), s: new Float32Array(N) };
+        const hs = [0, 0];
+        for (let i = 0; i < N; i++) { hueSat(R[i], G[i], B[i], hs); C0.h[i] = hs[0]; C0.s[i] = hs[1]; }
+      }
       for (const m of masks) {
         const adj = Object.assign(defaultLocalAdj(), m.adj || {});
         if (!LOCAL_KEYS.some(k => adj[k])) continue;
-        maskW.push(maskWeights(m, SX, SY, Y0, N, W, H));
+        maskW.push(maskWeights(m, SX, SY, Y0, N, W, H, C0, s.masks));
         maskAdj.push(adj);
       }
     }
@@ -1415,7 +1461,7 @@
 
     // 8. Output
     let ovW = null;
-    if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H);
+    if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
     const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16);
     return {
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,
@@ -1853,7 +1899,7 @@
   }
 
   const api = {
-    neighborhoodPad, noiseReductionForIso, waveletDenoise, blurPlane, setMaskMap, hasMaskMap, getMaskMap, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
+    neighborhoodPad, noiseReductionForIso, hueSat, masksNeedColor, waveletDenoise, blurPlane, setMaskMap, hasMaskMap, getMaskMap, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
     colorLUT, parseCube, applyCube, lookLUT, brushRaster, calibMatrix, autoGrade, analyzeForGrade, GRADE_STYLES, GRADE_STRENGTH, INPUT_PROFILES, inputLUT, inputKnee, rawLogEncode,
     HUE_BANDS, HUE_CENTERS, LOCAL_KEYS,
     defaultSettings, defaultLocalAdj, normalizeSettings, beforeSettings, clone,

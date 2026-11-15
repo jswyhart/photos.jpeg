@@ -30,7 +30,7 @@
   // masks
   uniform int uMaskCount;
   uniform int uMType[${MAX_MASKS}];
-  uniform vec4 uMA[${MAX_MASKS}], uMB[${MAX_MASKS}], uMC[${MAX_MASKS}];
+  uniform vec4 uMA[${MAX_MASKS}], uMB[${MAX_MASKS}], uMC[${MAX_MASKS}], uMD[${MAX_MASKS}];
   uniform vec4 uAdjA[${MAX_MASKS}], uAdjB[${MAX_MASKS}], uAdjC[${MAX_MASKS}];
   uniform sampler2D uBrush0, uBrush1, uBrush2, uBrush3;
   uniform vec2 uBrushGrid[${MAX_BRUSH}];
@@ -69,7 +69,8 @@
     return texture(uBrush3, uv).r;
   }
 
-  float maskWeight(int i, vec2 s, float y0){
+  // a mask's own shape, with its invert, luminance range and colour range; c0 = the source colour (gamma)
+  float maskShape(int i, vec2 s, float y0, vec3 c0){
     vec2 u = s / uL;
     float w = 0.0;
     int t = uMType[i];
@@ -92,7 +93,25 @@
       float sm = max(0.02, C.z * 0.3);
       w *= sstep(C.x - sm, C.x + 1e-4, y0) * (1.0 - sstep(C.y - 1e-4, C.y + sm, y0));
     }
-    return w * C.w;
+    // D = hue, tolerance, colour range on, combine (+n: intersect with mask n−1, −n: subtract it)
+    vec4 D = uMD[i];
+    if (D.z > 0.5 && w > 0.0) {
+      float mx = max(c0.r, max(c0.g, c0.b)), mn = min(c0.r, min(c0.g, c0.b)), ch = mx - mn, hh = 0.0;
+      if (ch > 1e-6) {
+        if (mx == c0.r) hh = mod((c0.g - c0.b) / ch, 6.0); else if (mx == c0.g) hh = (c0.b - c0.r) / ch + 2.0; else hh = (c0.r - c0.g) / ch + 4.0;
+        hh /= 6.0;
+      }
+      float sat = mx > 1e-4 ? ch / mx : 0.0;
+      float d = abs(fract(hh - D.x + 0.5) - 0.5), soft = max(0.02, D.y * 0.5);
+      w *= (1.0 - sstep(D.y, D.y + soft, d)) * sstep(0.04, 0.12, sat);
+    }
+    return w;
+  }
+  float maskWeight(int i, vec2 s, float y0, vec3 c0){
+    float w = maskShape(i, s, y0, c0), lc = uMD[i].w;
+    if (lc > 0.5) w *= maskShape(int(lc + 0.5) - 1, s, y0, c0);
+    else if (lc < -0.5) w *= 1.0 - maskShape(int(-lc + 0.5) - 1, s, y0, c0);
+    return w * uMC[i].w;
   }
 
   vec3 wbGains(float temp, float tint){
@@ -182,7 +201,7 @@
       float ev = 0.0, lt = 0.0, li = 0.0;
       for (int i = 0; i < ${MAX_MASKS}; i++) {
         if (i >= uMaskCount) break;
-        float w = maskWeight(i, s, y0);
+        float w = maskWeight(i, s, y0, raw);
         if (w <= 0.0) continue;
         ev += uAdjA[i].z * w; lt += uAdjA[i].x * w; li += uAdjA[i].y * w;
       }
@@ -222,6 +241,7 @@
   /* ---------------- pass 2 ---------------- */
   const PASS2 = COMMON + `
   uniform sampler2D uP1, uYl, uYt, uDC;
+  uniform bool uMaskColor; uniform vec3 uUngain;
   uniform sampler3D uLut;
   uniform float uContrast, uHigh, uShad, uWhite, uBlack, uTex, uClar, uDeh;
   uniform bool uHasYl, uHasYt, uHasDC, uLocalTone, uLocalSat, uUseLut;
@@ -254,6 +274,10 @@
     vec4 p1 = texture(uP1, uv);
     vec3 c = p1.rgb; float y0 = p1.a;
     vec2 s = toSource(o);
+    // the source colour, for masks limited to a colour: pass 1's result with the white balance and
+    // exposure taken back out (close to what the final render uses; exact unless calibration or a
+    // local white balance is also in play)
+    vec3 c0 = uMaskColor ? toSrgb(toLin(c) / uUngain) : c;
 
     // 5×5 neighbourhood of pass 1 for sharpening and noise reduction
     float Yb = 0.0, wb = 0.0; vec3 Cb = vec3(0.0);
@@ -297,7 +321,7 @@
       mw[i] = 0.0;
       if (i >= uMaskCount) break;
       if (!(uLocalTone || uLocalSat) && uOverlayMask != i) continue;
-      float w = maskWeight(i, s, y0);
+      float w = maskWeight(i, s, y0, c0);
       mw[i] = w;
       if (w <= 0.0) continue;
       cC += uAdjA[i].w * w; cH += uAdjB[i].x * w; cS += uAdjB[i].y * w; cW += uAdjB[i].z * w; cB += uAdjB[i].w * w;
@@ -569,7 +593,7 @@
       const gl = this.gl, L = prog.locs;
       const n = Math.min(MAX_MASKS, masks.length);
       gl.uniform1i(L.uMaskCount, n);
-      const types = new Int32Array(MAX_MASKS), A = new Float32Array(MAX_MASKS * 4), B = new Float32Array(MAX_MASKS * 4), C = new Float32Array(MAX_MASKS * 4);
+      const types = new Int32Array(MAX_MASKS), A = new Float32Array(MAX_MASKS * 4), B = new Float32Array(MAX_MASKS * 4), C = new Float32Array(MAX_MASKS * 4), D = new Float32Array(MAX_MASKS * 4);
       const aA = new Float32Array(MAX_MASKS * 4), aB = new Float32Array(MAX_MASKS * 4), aC = new Float32Array(MAX_MASKS * 4);
       for (let i = 0; i < n; i++) {
         const m = masks[i], adj = Object.assign(P.defaultLocalAdj(), m.adj || {});
@@ -578,12 +602,14 @@
         else { types[i] = 2; B[i * 4 + 2] = brushSlots[i] ?? 0; }
         B[i * 4 + 3] = m.invert ? 1 : 0;
         C.set([(m.lumMin ?? 0) / 100, (m.lumMax ?? 100) / 100, (m.lumSmooth ?? 20) / 100, (m.amount ?? 100) / 100], i * 4);
+        const li = m.limit ? masks.findIndex((o, k) => k < n && o.id === m.limit.id && o !== m) : -1;
+        D.set([((m.colHue ?? 0) % 360) / 360, Math.max(0.005, Math.min(0.5, (m.colRange ?? 30) / 360)), m.colOn ? 1 : 0, li < 0 ? 0 : m.limit.mode === 'subtract' ? -(li + 1) : li + 1], i * 4);
         aA.set([adj.temp, adj.tint, adj.exposure, adj.contrast], i * 4);
         aB.set([adj.highlights, adj.shadows, adj.whites, adj.blacks], i * 4);
         aC.set([adj.texture, adj.clarity, adj.dehaze, adj.saturation], i * 4);
       }
       gl.uniform1iv(L.uMType, types);
-      gl.uniform4fv(L.uMA, A); gl.uniform4fv(L.uMB, B); gl.uniform4fv(L.uMC, C);
+      gl.uniform4fv(L.uMA, A); gl.uniform4fv(L.uMB, B); gl.uniform4fv(L.uMC, C); if (L.uMD) gl.uniform4fv(L.uMD, D);
       gl.uniform4fv(L.uAdjA, aA); gl.uniform4fv(L.uAdjB, aB); gl.uniform4fv(L.uAdjC, aC);
       // brush textures on units 8..11
       const grids = new Float32Array(MAX_BRUSH * 2).fill(1);
@@ -638,6 +664,11 @@
       const realW = this.srcW, realH = this.srcH;
       this.srcW = W; this.srcH = H;
       const masks = (s.masks || []).filter(m => m.visible !== false);
+      // a hidden mask can still shape a visible one it is combined with: it comes along, adjusting nothing
+      for (const m of masks.slice()) {
+        const o = m.limit && (s.masks || []).find(x => x.id === m.limit.id);
+        if (o && !masks.includes(o) && !masks.some(x => x.id === o.id)) masks.push(Object.assign({}, o, { adj: {} }));
+      }
       const brushSlots = this.uploadBrushes(masks);
       const L = Math.max(W, H);
       const rs = Math.min(1, L / (opts.fullLong || L));
@@ -744,6 +775,8 @@
       this.setMaskUniforms(pr, masks, brushSlots);
       const bind = (unit, tex, name) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex || this.dummy); gl.uniform1i(pr.locs[name], unit); };
       bind(0, f1.tex, 'uP1'); bind(1, yl, 'uYl'); bind(2, yt, 'uYt'); bind(3, dc, 'uDC');
+      gl.uniform1i(pr.locs.uMaskColor, P.masksNeedColor(masks) ? 1 : 0);
+      gl.uniform3f(pr.locs.uUngain, Math.max(1e-4, gr * em), Math.max(1e-4, gg * em), Math.max(1e-4, gb * em));
       gl.uniform2f(pr.locs.uP1Size, outW, outH);
       gl.uniform1i(pr.locs.uHasYl, yl ? 1 : 0); gl.uniform1i(pr.locs.uHasYt, yt ? 1 : 0); gl.uniform1i(pr.locs.uHasDC, dc ? 1 : 0);
       const useLut = !this.isLutIdentity(s);

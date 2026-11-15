@@ -508,15 +508,27 @@
       }]
     });
   }
-  function pasteSettings() {
+  /** Settings that came from another photo: its Subject / Sky / People masks are found again in each target. */
+  async function refindMasks(photos, partial) {
+    const out = { redone: 0, empty: 0 };
+    if (!PJ.AIMask || !PJ.AIMask.hasAi(partial)) return out;
+    let n = 0;
+    for (const p of photos) {
+      UI.activity(`Finding the masks in ${p.name}…`, ++n / (photos.length + 1));
+      try { const r = await PJ.AIMask.retarget(p); out.redone += r.redone; if (r.empty.length) out.empty++; }
+      catch (e) { console.warn('masks could not be found again for', p.name, e && e.message); }
+    }
+    UI.activity('');
+    return out;
+  }
+  const maskNote = (r) => r.redone ? ` · masks found again${r.empty ? ` (nothing to find in ${r.empty} photo(s))` : ''}` : '';
+  async function pasteSettings() {
     if (!clipboard) return UI.toast('Nothing copied yet — use Copy first', 'circle-info');
     const ts = targets();
-    for (const p of ts) {
-      p.settings = Cat.applyGroups(p.settings, clipboard.partial, clipboard.groups);
-      Cat.commit(p, 'Paste Settings');
-      afterSettings(p);
-    }
-    UI.toast(`Pasted settings to ${ts.length} photo(s)`, 'paste');
+    for (const p of ts) p.settings = Cat.applyGroups(p.settings, clipboard.partial, clipboard.groups);
+    const r = await refindMasks(ts, clipboard.partial);
+    for (const p of ts) { Cat.commit(p, 'Paste Settings'); afterSettings(p); }
+    UI.toast(`Pasted settings to ${ts.length} photo(s)${maskNote(r)}`, 'paste');
   }
   function syncSettings() {
     const p = activePhoto();
@@ -526,12 +538,14 @@
     UI.modal({
       title: `Synchronize Settings to ${others.length} photo(s)`, icon: 'arrows-rotate', body: checks.el,
       buttons: [{ label: 'Cancel' }, {
-        label: 'Synchronize', primary: true, onClick: () => {
+        label: 'Synchronize', primary: true, onClick: async () => {
           const gs = checks.get();
           Cat.setPref('sync.groups', gs);
           const partial = Cat.pickGroups(p.settings, gs);
-          for (const o of others) { o.settings = Cat.applyGroups(o.settings, partial, gs); Cat.commit(o, 'Sync Settings'); E.queueThumb(o); }
-          UI.toast(`Synchronized ${others.length} photo(s)`, 'arrows-rotate');
+          for (const o of others) o.settings = Cat.applyGroups(o.settings, partial, gs);
+          const r = await refindMasks(others, partial);
+          for (const o of others) { Cat.commit(o, 'Sync Settings'); E.queueThumb(o); }
+          UI.toast(`Synchronized ${others.length} photo(s)${maskNote(r)}`, 'arrows-rotate');
         }
       }]
     });

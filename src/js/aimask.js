@@ -264,8 +264,34 @@
     const id = PJ.Catalog.uid('mm');
     remember(id, map);
     await store(id, map);
-    return { ai: kind, map: { id, w: map.w, h: map.h }, name: KINDS[kind].name };
+    return { ai: kind, map: { id, w: map.w, h: map.h, of: photo.id }, name: KINDS[kind].name };
   }
+
+  /**
+   * After settings came from another photo (paste, sync, a preset): its Subject / Sky / People masks
+   * are found again in this photo, since the shape belongs to the photo it was made on.
+   * Changes photo.settings.masks in place; resolves to { redone, empty: [names with nothing to find] }.
+   */
+  async function retarget(photo) {
+    const res = { redone: 0, empty: [] };
+    const ms = photo.settings && photo.settings.masks;
+    if (!ms || photo.kind === 'video') return res;
+    for (const m of ms) {
+      if (!m.ai || !KINDS[m.ai] || !m.map || m.map.of === photo.id) continue;
+      let map = null;
+      try { map = await compute(photo, m.ai); }
+      catch (e) { console.warn(`the ${m.ai} mask could not be made for ${photo.name}:`, e && e.message); }
+      const id = PJ.Catalog.uid('mm');
+      if (!map || !map.found) { map = { w: 1, h: 1, data: new Uint8Array(1) }; res.empty.push(m.name); }
+      remember(id, map);
+      await store(id, map);
+      m.map = { id, w: map.w, h: map.h, of: photo.id };
+      m.dabs = [];                      // touch-ups painted on the other photo do not belong here
+      res.redone++;
+    }
+    return res;
+  }
+  const hasAi = (settings) => !!(settings && settings.masks && settings.masks.some(m => m.ai && m.map));
 
   /**
    * What the scene model sees in a photo: [{ label, share }] for the kinds of thing that cover a
@@ -293,5 +319,5 @@
   const SCENE_LABELS = { 1: 'building', 2: 'sky', 4: 'tree', 6: 'road', 7: 'bed', 9: 'grass', 12: 'people', 13: 'earth', 16: 'mountain', 17: 'plant', 19: 'chair', 20: 'car', 21: 'water', 23: 'sofa', 25: 'house', 26: 'sea', 29: 'field', 32: 'fence', 34: 'rock', 46: 'sand', 48: 'skyscraper', 52: 'path', 53: 'stairs', 60: 'river', 61: 'bridge', 66: 'flower', 67: 'book', 68: 'hill', 72: 'palm tree', 76: 'boat', 80: 'bus', 83: 'truck', 84: 'tower', 90: 'airplane', 91: 'dirt track', 94: 'pole', 102: 'van', 103: 'ship', 104: 'fountain', 109: 'swimming pool', 113: 'waterfall', 114: 'tent', 116: 'motorbike', 126: 'animal', 127: 'bicycle', 128: 'lake', 136: 'traffic light', 149: 'flag' };
   const SMALL_THINGS = new Set([12, 20, 66, 76, 80, 83, 90, 102, 103, 116, 126, 127, 136, 149]);
 
-  global.PJ.AIMask = { KINDS, create, ensure, ready, describe, _test: { compute, probability, refine } };
+  global.PJ.AIMask = { KINDS, create, ensure, ready, describe, retarget, hasAi, _test: { compute, probability, refine } };
 })(window);

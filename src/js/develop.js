@@ -1043,6 +1043,35 @@
         mslider('Min', () => m.lumMin ?? 0, v => { m.lumMin = Math.min(v, (m.lumMax ?? 100) - 1); }, 0, 100, 0),
         mslider('Max', () => m.lumMax ?? 100, v => { m.lumMax = Math.max(v, (m.lumMin ?? 0) + 1); }, 0, 100, 100),
         mslider('Smooth', () => m.lumSmooth ?? 20, v => { m.lumSmooth = v; }, 0, 100, 20));
+      // Colour range: keep only the part of the mask near one colour (a blue sky, a red coat)
+      const swatch = h('span', { class: 'hue-swatch', style: { background: `hsl(${m.colHue ?? 0} 85% 50%)` } });
+      shape.append(
+        h('div', { class: 'sub' }, 'Colour range'),
+        h('div', { class: 'row', style: { marginBottom: '4px' } },
+          UI.checkbox('Limit to a colour', !!m.colOn, (v) => { m.colOn = v; if (m.colHue == null) m.colHue = 210; if (m.colRange == null) m.colRange = 30; Cat.commit(photo, v ? 'Mask: limit to a colour' : 'Mask: any colour'); viewer.update('commit'); buildToolPane(); }).el,
+          h('span', { class: 'spacer' }), swatch,
+          h('button', {
+            class: 'btn icon sm', title: 'Pick the colour from the photo',
+            onclick: () => viewer.pickColor((hue) => { m.colOn = true; m.colHue = hue; if (m.colRange == null) m.colRange = 30; Cat.commit(photo, 'Mask: colour picked'); viewer.update('commit'); buildToolPane(); })
+          }, icon('eye-dropper'))));
+      if (m.colOn) shape.append(
+        mslider('Hue', () => m.colHue ?? 0, v => { m.colHue = v; swatch.style.background = `hsl(${v} 85% 50%)`; }, 0, 360, 210),
+        mslider('Range', () => m.colRange ?? 30, v => { m.colRange = v; }, 5, 180, 30));
+      // Combine: narrow this mask by another one of the photo
+      const others = masks.filter(o => o !== m);
+      if (others.length) {
+        const sel = h('select', {
+          style: { flex: '1', minWidth: '0' }, onchange: () => {
+            const [mode, id] = sel.value.split(':');
+            if (mode === 'none') delete m.limit; else m.limit = { id, mode };
+            Cat.commit(photo, 'Mask: combine'); viewer.update('commit');
+          }
+        }, h('option', { value: 'none:' }, 'On its own'),
+          ...others.map(o => h('option', { value: 'intersect:' + o.id }, 'Only inside “' + o.name + '”')),
+          ...others.map(o => h('option', { value: 'subtract:' + o.id }, 'Not inside “' + o.name + '”')));
+        sel.value = m.limit && others.some(o => o.id === m.limit.id) ? m.limit.mode + ':' + m.limit.id : 'none:';
+        shape.append(h('div', { class: 'sub' }, 'Combine'), h('div', { class: 'row', style: { marginBottom: '6px' } }, sel));
+      }
       const adj = m.adj;
       const A = (key, label, min, max, rail, step) => mslider(label, () => adj[key] || 0, v => { adj[key] = v; }, min, max, 0, rail, step);
       toolPane.append(shape,
