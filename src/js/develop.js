@@ -958,13 +958,33 @@
           h('span', { class: 'spacer' }), h('button', { class: 'btn sm primary', onclick: () => viewer.setTool('spot') }, 'Done')),
         h('div', { class: 'curve-hint' }, 'Click a blemish to heal it — a matching source is picked automatically. Drag circles to adjust · Alt-drag moves only the target · Delete removes the selected spot.'));
     }
+    let aiBusy = false;
     function buildMaskPane() {
       const st = viewer.st;
       const masks = photo ? photo.settings.masks : [];
       const add = (type, ic, label) => h('button', { class: `btn sm${st.maskCreate === type ? ' active' : ''}`, onclick: () => viewer.startMask(type), title: `New ${label}` }, icon(ic), label);
+      // Subject / Sky / People: found by a small neural network on this computer, then an ordinary brush mask
+      const addAi = (kind, ic, label) => {
+        const b = h('button', {
+          class: 'btn sm', title: `Mask the ${label.toLowerCase()} automatically — then adjust it like any mask, or touch it up with the brush`,
+          onclick: async () => {
+            const p = photo;
+            if (!p || aiBusy) return;
+            aiBusy = true; b.disabled = true;
+            UI.activity(PJ.AIMask.KINDS[kind].busy, null);
+            try {
+              const fields = await PJ.AIMask.create(p, kind);
+              if (p === photo) viewer.addMask(fields);
+            } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
+            finally { aiBusy = false; UI.activity(''); if (b.isConnected) b.disabled = false; }
+          }
+        }, icon(ic), label);
+        b.disabled = aiBusy || !photo || photo.kind === 'video';
+        return b;
+      };
       const list = h('div', { class: 'mask-list' });
       masks.forEach((m, i) => {
-        const ic = m.type === 'linear' ? 'grip-lines' : m.type === 'radial' ? 'circle' : 'paintbrush';
+        const ic = m.ai === 'subject' ? 'user-large' : m.ai === 'sky' ? 'cloud-sun' : m.ai === 'people' ? 'people-group' : m.type === 'linear' ? 'grip-lines' : m.type === 'radial' ? 'circle' : 'paintbrush';
         const item = h('div', { class: `mask-item${i === st.maskIdx ? ' on' : ''}` },
           h('span', { class: 'mi-ic' }, icon(ic)),
           h('span', { class: 'mi-n' }, m.name + (m.invert ? ' (inv)' : '')),
@@ -988,6 +1008,7 @@
       toolPane.append(
         h('h4', null, icon('circle-half-stroke'), 'Masking', h('span', { class: 'spacer' }), overlay.el),
         h('div', { class: 'add-row' }, add('linear', 'grip-lines', 'Linear'), add('radial', 'circle', 'Radial'), add('brush', 'paintbrush', 'Brush')),
+        PJ.AIMask ? h('div', { class: 'add-row' }, addAi('subject', 'user-large', 'Subject'), addAi('sky', 'cloud-sun', 'Sky'), addAi('people', 'people-group', 'People')) : null,
         list);
       const m = viewer.activeMask();
       if (!m) {

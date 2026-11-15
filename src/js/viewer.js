@@ -1237,6 +1237,20 @@
         return true;
       },
       // masks
+      /** Add a ready-made mask (a Subject / Sky / People mask) and select it. */
+      addMask(fields) {
+        if (!st.photo) return null;
+        const m = Object.assign(newMask('brush'), { dabs: [] }, fields);
+        const same = st.photo.settings.masks.filter(q => q.ai === m.ai).length;
+        if (same) m.name = `${m.name} ${same + 1}`;
+        st.photo.settings.masks.push(m); st.maskIdx = st.photo.settings.masks.length - 1;
+        st.maskCreate = null;
+        if (st.tool !== 'mask') api.setTool('mask');
+        Cat.commit(st.photo, `${fields.name || 'New'} mask`);
+        update('commit');
+        events.emit('masks');
+        return m;
+      },
       startMask(type) { st.maskCreate = type; if (st.tool !== 'mask') api.setTool('mask'); setCursor(); events.emit('masks'); },
       selectMask(i) { st.maskIdx = i; update('commit'); events.emit('masks'); },
       setMaskOverlay(b) { st.maskOverlay = b; update('commit'); },

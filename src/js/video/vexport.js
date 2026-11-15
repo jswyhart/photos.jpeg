@@ -331,6 +331,7 @@
       } catch (e) { console.warn('optimized media for export failed; reading frames from the player', e && e.message); }
     }
     if (photo.settings.lut && photo.settings.lut.id && PJ.LUTs) await PJ.LUTs.get(photo.settings.lut.id);
+    if (PJ.AIMask) await PJ.AIMask.ensure(photo, photo.settings);
     const v = photo.video;
     const dur = clip.duration;
     let t0 = 0, t1 = dur;

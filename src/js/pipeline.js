@@ -692,15 +692,33 @@
   /* Masks                                                               */
   /* ------------------------------------------------------------------ */
   const brushCache = new Map();
+  /* Mask maps: the shape of a Subject / Sky / People mask (see aimask.js), an 8-bit greyscale image
+     kept outside the settings and registered here by id — on the UI thread and in every worker. */
+  const maskMaps = new Map();
+  function setMaskMap(id, w, h, data) { maskMaps.set(id, { w, h, data }); }
+  function hasMaskMap(id) { return maskMaps.has(id); }
+  function getMaskMap(id) { return maskMaps.get(id) || null; }
   function brushRaster(mask, W, H) {
     const L = Math.max(W, H), G = 512;
     const gw = Math.max(1, Math.ceil(G * W / L)), gh = Math.max(1, Math.ceil(G * H / L));
     const dabs = mask.dabs || [];
+    const map = mask.map ? maskMaps.get(mask.map.id) : null;
     let sig = 0;
     for (let i = 0; i < dabs.length; i += Math.max(1, dabs.length >> 5)) sig += dabs[i].x * 7 + dabs[i].y * 13 + dabs[i].r;
-    const key = `${mask.id}:${gw}x${gh}:${dabs.length}:${sig.toFixed(5)}`;
+    const key = `${mask.id}:${gw}x${gh}:${dabs.length}:${sig.toFixed(5)}:${map ? mask.map.id + map.w : ''}`;
     if (brushCache.has(key)) return { grid: brushCache.get(key), gw, gh, G };
     const grid = new Float32Array(gw * gh);
+    if (map) {
+      // the map is the starting point; brush strokes then add to it or erase from it
+      const mw = map.w, mh = map.h, md = map.data;
+      for (let y = 0; y < gh; y++) {
+        const fy = Math.max(0, Math.min(mh - 1, (y + 0.5) * mh / gh - 0.5)), y0 = Math.floor(fy), y1 = Math.min(mh - 1, y0 + 1), ty = fy - y0;
+        for (let x = 0; x < gw; x++) {
+          const fx = Math.max(0, Math.min(mw - 1, (x + 0.5) * mw / gw - 0.5)), x0 = Math.floor(fx), x1 = Math.min(mw - 1, x0 + 1), tx = fx - x0;
+          grid[y * gw + x] = ((md[y0 * mw + x0] * (1 - tx) + md[y0 * mw + x1] * tx) * (1 - ty) + (md[y1 * mw + x0] * (1 - tx) + md[y1 * mw + x1] * tx) * ty) / 255;
+        }
+      }
+    }
     for (const d of dabs) {
       const cx = d.x * G, cy = d.y * G, R = Math.max(0.5, d.r * G);
       const feather = clamp((d.feather ?? 50) / 100, 0, 1), flow = clamp((d.flow ?? 100) / 100, 0, 1);
@@ -1789,7 +1807,7 @@
   }
 
   const api = {
-    neighborhoodPad, noiseReductionForIso, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
+    neighborhoodPad, noiseReductionForIso, setMaskMap, hasMaskMap, getMaskMap, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
     colorLUT, parseCube, applyCube, lookLUT, brushRaster, calibMatrix, autoGrade, analyzeForGrade, GRADE_STYLES, GRADE_STRENGTH, INPUT_PROFILES, inputLUT, inputKnee, rawLogEncode,
     HUE_BANDS, HUE_CENTERS, LOCAL_KEYS,
     defaultSettings, defaultLocalAdj, normalizeSettings, beforeSettings, clone,

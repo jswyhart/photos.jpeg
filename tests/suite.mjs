@@ -206,6 +206,35 @@ test('auto upright straightens a tilted building', async () => {
   near(Math.abs(r.lean), 2, 0.4, 'lean of the tilted building, in degrees'); assert(Math.abs(r.after) < 0.01, `the straight building measured as converging (${r.after})`);
 });
 
+test('Sky mask: found, stored outside the settings, same on both renderers', async () => {
+  const r = await page(async () => {
+    const E = PJ.Engine, P = PJ.Pipeline, M = PJ.AIMask, p = PJ.Catalog.state.photos.find(x => x.name === 'building.jpg');
+    if (!M) return { skipped: true };
+    await E.ensureSource(p);
+    let fields;
+    try { fields = await M.create(p, 'sky'); } catch (e) { return { error: e.message }; }
+    const map = P.getMaskMap(fields.map.id); let sum = 0, top = 0, bottom = 0;
+    for (let i = 0; i < map.data.length; i++) { sum += map.data[i]; if (i < map.data.length * 0.1) top += map.data[i]; if (i > map.data.length * 0.9) bottom += map.data[i]; }
+    const s = P.defaultSettings();
+    s.masks = [Object.assign({ id: 'mk_test', type: 'brush', name: 'Sky', visible: true, invert: false, amount: 100, lumMin: 0, lumMax: 100, lumSmooth: 20, adj: P.defaultLocalAdj(), dabs: [] }, fields)];
+    s.masks[0].adj.exposure = -1.5;
+    const c = await E.render(p, s, 'proxy', {}, 0), plain = await E.render(p, P.defaultSettings(), 'proxy', {}, 0), g = E.renderGPU(p, s, {});
+    let changed = 0, n = 0, diff = 0, gp = null;
+    if (g) { const t = document.createElement('canvas'); t.width = g.width; t.height = g.height; const x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(g.canvas, 0, 0); gp = x.getImageData(0, 0, g.width, g.height).data; }
+    for (let i = 0; i < c.data.length; i += 44) { n++; if (Math.abs(c.data[i] - plain.data[i]) > 8) changed++; if (gp) diff += Math.abs(c.data[i] - gp[i]) + Math.abs(c.data[i + 1] - gp[i + 1]) + Math.abs(c.data[i + 2] - gp[i + 2]); }
+    const disk = await fetch(PJ.API.thumbUrl('mm_' + fields.map.id, 1));
+    return { cover: sum / map.data.length / 255, top: top / (map.data.length * 0.1) / 255, bottom: bottom / (map.data.length * 0.1) / 255, settingsBytes: JSON.stringify(s.masks).length, darkened: changed / n, gpuDiff: gp ? diff / n / 3 : null, onDisk: disk.ok };
+  });
+  if (r.skipped) return 'skipped';
+  assert(!r.error, r.error);
+  assert(r.cover > 0.1 && r.cover < 0.7, `sky covers ${(r.cover * 100).toFixed(0)}% of the building picture`);
+  assert(r.top > 0.8 && r.bottom < 0.2, `sky should be at the top (top ${r.top.toFixed(2)}, bottom ${r.bottom.toFixed(2)})`);
+  assert(r.settingsBytes < 2000, `the mask adds ${r.settingsBytes} bytes to the settings`);
+  assert(r.darkened > 0.08, 'the mask had no effect on the render'); assert(r.onDisk, 'the mask map was not stored');
+  if (r.gpuDiff !== null) assert(r.gpuDiff < 1.5, `renderers differ by ${r.gpuDiff.toFixed(2)}`);
+  return `sky covers ${(r.cover * 100).toFixed(0)}%`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

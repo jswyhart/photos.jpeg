@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline' app:; font-src 'self' app: data:; script-src 'self' app:; worker-src 'self' app: blob:; connect-src 'self' app: data: blob:; media-src 'self' app: blob: data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' app:; img-src 'self' app: data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline' app:; font-src 'self' app: data:; script-src 'self' app: 'wasm-unsafe-eval'; worker-src 'self' app: blob:; connect-src 'self' app: data: blob:; media-src 'self' app: blob: data:">
   <title>photos.jpeg</title>
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
@@ -59,6 +59,7 @@
   <script src="js/engine.js"></script>
   <script src="js/lens.js"></script>
   <script src="js/upright.js"></script>
+  <script src="js/aimask.js"></script>
   <script src="js/widgets.js"></script>
   <script src="js/viewer.js"></script>
   <script src="js/develop.js"></script>

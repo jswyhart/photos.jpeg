@@ -140,6 +140,7 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 - **Lens profiles** (Develop → Lens Corrections → *Lens profile*, or Photo → Apply Lens Profile for a whole selection): the photo's camera and lens are looked up in the bundled [lensfun](https://lensfun.github.io) database (about 1,500 lenses) and the calibrated distortion, colour fringing (lateral chromatic aberration) and vignetting for the focal length and aperture used are corrected. The image is scaled just enough to leave no empty border. *Off* removes it. Preferences → *Apply lens profiles on import* does it for every new photo. Fisheye lenses are not handled; vignetting assumes a distant subject.
 - **Auto upright** (Develop → Transform): finds the vertical lines in the photo and sets Vertical, Rotate and Scale so buildings stand straight. It needs several long, straight vertical edges spread across the frame and says so when there aren't enough.
 - **Noise reduction for the ISO** (Develop → Detail → *Auto for ISO*, or Preferences → *Apply noise reduction by ISO on import*): sets luminance and colour noise reduction from the ISO the photo was taken at.
+- **Subject, Sky and People masks** (Develop → Masking): a small neural network finds the subject, the sky or the people in the photo and makes a mask of them — an ordinary mask from then on: adjust it, invert it, limit it by luminance, or touch it up with the brush (paint to add, Alt-paint to erase). It runs on your computer in a fraction of a second; nothing is uploaded. The models are bundled in `src/vendor/ml` (about 35 MB with the runtime) — see the README there for their licences: the Sky and People model (SegFormer) is licensed by NVIDIA for non-commercial use only.
 - **Healing strokes**: with the spot tool, drag instead of clicking to heal or clone along a line (wires, scratches); the stroke moves and deletes as one piece.
 - **Compare** (View → Compare Selected Photos): two to six photos side by side; rate, pick and reject from the keyboard.
 - **Stacks** (Photo → Stacking): group photos under one thumbnail, or let *Auto-Stack* group bursts (shots within two seconds) and RAW + JPEG pairs. The badge on the thumbnail opens and closes a stack.
@@ -277,6 +278,7 @@ src/js/engine.js   Source cache, worker pool, thumbnails, auto tone/WB
 src/js/decode.js   Image decoding, embedded RAW previews, EXIF parser
 src/js/rawdec.js   RAW decoders (NEF, CR2, ARW, DNG/LJ92), demosaic, camera colour (runs in workers)
 src/js/rawgpu.js   The same development as WebGL 2 shaders (runs in a worker on an OffscreenCanvas)
+src/js/aimask.js   Subject / Sky / People masks (ONNX Runtime Web + the models in src/vendor/ml)
 src/js/upright.js  Auto upright (vertical line detection → Transform settings)
 src/js/icc.js      Colour profiles for exports (sRGB, Display P3, Adobe RGB)
 src/js/lens.js     Lens profiles: lensfun database lookup, and distortion measured against the camera's own preview

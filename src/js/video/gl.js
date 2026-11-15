@@ -594,7 +594,7 @@
       masks.forEach((m, i) => {
         if (m.type !== 'brush' || k >= MAX_BRUSH) return;
         const r = P.brushRaster(m, this.srcW, this.srcH);
-        const sig = `${m.id}:${(m.dabs || []).length}:${r.gw}x${r.gh}`;
+        const sig = `${m.id}:${(m.dabs || []).length}:${r.gw}x${r.gh}:${m.map && P.hasMaskMap(m.map.id) ? m.map.id : ''}`;
         if (this.brushSig[k] !== sig) {
           gl.bindTexture(gl.TEXTURE_2D, this.brushTex[k]);
           gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);

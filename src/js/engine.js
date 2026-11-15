@@ -22,7 +22,7 @@
     }
     _spawn(i) {
       const w = new Worker(this.url);
-      const rec = { w, busy: false, keys: new Set(), idx: i, current: 0 };
+      const rec = { w, busy: false, keys: new Set(), maps: new Set(), idx: i, current: 0 };
       w.onmessage = (e) => this._onMsg(rec, e.data);
       // A worker that dies (out of memory on a huge file, a crash) must not leave renders waiting
       // forever: fail its job and start a fresh worker in its place.
@@ -100,6 +100,15 @@
         this.pending.set(id, { resolve, reject: q.reject, job, q });
         rec.w.postMessage(Object.assign({ type: 'task', id }, job.task), job.transfer);
         return;
+      }
+      // mask maps this render's settings name, which this worker hasn't been given yet
+      for (const m of (job.settings && job.settings.masks) || []) {
+        if (!m.map || rec.maps.has(m.map.id)) continue;
+        const mm = P.getMaskMap(m.map.id);
+        if (!mm) continue;
+        const buf = mm.data.slice().buffer;
+        rec.w.postMessage({ type: 'maskMap', id: m.map.id, w: mm.w, h: mm.h, buffer: buf }, [buf]);
+        rec.maps.add(m.map.id);
       }
       const go = () => {
         const id = ++this.seq;
@@ -411,6 +420,8 @@
    * Returns {data: Uint8ClampedArray, width, height, fullWidth, fullHeight, region, hist, clip, ms, level, scale}
    */
   async function render(photo, settings, level, opts, priority, want) {
+    // Subject / Sky / People masks: their shapes have to be in memory before a worker can use them
+    if (PJ.AIMask && settings && settings.masks && !PJ.AIMask.ready(settings)) await PJ.AIMask.ensure(photo, settings);
     const src = level === 'full' ? await ensureFull(photo) : await ensureSource(photo, want || 'best');
     // a stabilized clip's current frame gets its stabilizing transform
     if (photo.kind === 'video' && PJ.Stabilize && settings && settings.stab && settings.stab.amount > 0) settings = PJ.Stabilize.apply(photo, P.normalizeSettings(settings), PJ.Video.defaultTime(photo));
@@ -532,6 +543,8 @@
   /** Same result shape as render(), with `canvas` in place of `data`. Synchronous; null when unavailable. */
   function renderGPU(photo, settings, opts) {
     if (!gpuReady()) return null;
+    // a mask shape that isn't loaded yet: start loading it and let the CPU render (which waits for it) take this frame
+    if (PJ.AIMask && !PJ.AIMask.ready(settings)) { PJ.AIMask.ensure(photo, settings).catch(() => { }); return null; }
     const src = cachedSource(photo);
     if (!src || !src.proxy) return null;
     try {

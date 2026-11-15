@@ -20,6 +20,11 @@ self.onmessage = (e) => {
       self.postMessage({ type: 'hasSource', id: msg.id, has: sources.has(msg.key) });
       return;
     }
+    if (msg.type === 'maskMap') {
+      // the shape of a Subject / Sky / People mask, sent ahead of the renders that use it
+      PJ.Pipeline.setMaskMap(msg.id, msg.w, msg.h, new Uint8Array(msg.buffer));
+      return;
+    }
     if (msg.type === 'dropSource') {
       sources.delete(msg.key);
       return;
