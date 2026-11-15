@@ -34,7 +34,7 @@ class Storage(private val context: Context) {
             "hif", "jxl", "jp2", "j2k", "jpf", "jpx", "ico", "cur", "dib", "apng", "psd", "psb", "exr", "hdr", "pic", "pfm", "pbm", "pgm", "ppm", "pnm", "pam", "tga", "icb", "vda", "qoi")
         val VIDEO = setOf("mp4", "mov", "m4v", "mkv", "webm", "mts", "m2ts", "mxf", "avi", "lrv", "360", "insv", "3gp", "mpg", "mpeg", "m2v", "vob", "wmv", "flv", "3g2", "mod", "tod", "dv", "ogv",
             "braw", "r3d", "ari", "arx", "crm", "nev")
-        val WRITABLE = setOf("jpg", "jpeg", "png", "webp", "tif", "tiff", "json", "mp4", "mov", "cube", "xmp", "txt")
+        val WRITABLE = setOf("jpg", "jpeg", "png", "webp", "tif", "tiff", "jxl", "dng", "json", "mp4", "mov", "cube", "xmp", "txt")
         val TEXT_EXT = setOf("json", "cube", "xmp", "txt")
         const val CHUNK = 8L shl 20
         const val MEDIASTORE = "mediastore:"
@@ -76,6 +76,26 @@ class Storage(private val context: Context) {
     fun thumbFile(id: String) = File(thumbsDir, safeId(id) + ".jpg")
     fun saveThumb(id: String, bytes: ByteArray) = thumbFile(id).writeBytes(bytes)
     fun deleteThumb(id: String) { thumbFile(id).delete() }
+
+    /**
+     * Catalog clean-up: counts (and, when asked, removes) the files in the thumbnail store that no photo,
+     * mask, fill or face of the catalog refers to any more. Files written in the last ten minutes are left
+     * alone: something may be about to refer to them.
+     */
+    fun cleanStore(keepIds: List<String>, remove: Boolean): JSONObject {
+        val keep = keepIds.map { safeId(it).lowercase() + ".jpg" }.toHashSet()
+        var thumbs = 0; var thumbBytes = 0L; var orphans = 0; var orphanBytes = 0L; var removed = 0
+        val cutoff = System.currentTimeMillis() - 600_000
+        for (f in thumbsDir.listFiles() ?: emptyArray()) {
+            if (!f.isFile) continue
+            thumbs++; thumbBytes += f.length()
+            if (f.name.lowercase() in keep || f.lastModified() > cutoff) continue
+            orphans++; orphanBytes += f.length()
+            if (remove && f.delete()) removed++
+        }
+        return JSONObject().put("thumbs", thumbs).put("thumbBytes", thumbBytes).put("orphans", orphans).put("orphanBytes", orphanBytes)
+            .put("removed", removed).put("rawFiles", 0).put("rawBytes", 0).put("rawRemoved", 0)
+    }
 
     // ---------------- reading originals ----------------
 

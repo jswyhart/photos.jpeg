@@ -48,6 +48,7 @@ class Bridge(private val activity: MainActivity, private val storage: Storage) {
             "saveCatalog" -> bg { storage.saveCatalog(a.optString("json")); true }
             "saveThumb" -> bg { storage.saveThumb(a.optString("id"), Base64.decode(a.optString("data"), Base64.DEFAULT)); true }
             "deleteThumb" -> bg { storage.deleteThumb(a.optString("id")); true }
+            "cleanStore" -> bg { storage.cleanStore(a.optJSONArray("keep").toStringList(), a.optBoolean("remove")) }
             "chooseDirectory" -> activity.runOnUiThread {
                 activity.openTree { tree -> if (tree == null) resolve(id, null) else bg { storage.takeTree(tree) } }
             }

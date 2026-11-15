@@ -89,6 +89,10 @@ enum MenuBuilder {
         photo.addItem(cmd("Auto Tone", "autoTone", "u", [.command, .shift]))
         photo.addItem(cmd("Reset Develop Settings", "reset", "r", [.command, .shift]))
         photo.addItem(.separator())
+        photo.addItem(cmd("Merge to HDR…", "mergeHdr"))
+        photo.addItem(cmd("Merge to HDR (editable DNG)…", "mergeHdrDng"))
+        photo.addItem(cmd("Merge to Panorama…", "mergePano"))
+        photo.addItem(.separator())
         photo.addItem(cmd("New Snapshot…", "newSnapshot", "n", [.command]))
         photo.addItem(cmd("New Develop Preset…", "newPreset", "n", [.command, .shift]))
         add(main, "Photo", photo)
@@ -108,6 +112,7 @@ enum MenuBuilder {
         view.addItem(cmd("Develop   (D)", "develop"))
         view.addItem(cmd("Map   (M)", "map"))
         view.addItem(.separator())
+        view.addItem(cmd("Show Faces", "toggleFaces"))
         view.addItem(cmd("Before / After   (Y)", "beforeAfter"))
         view.addItem(cmd("Show Clipping   (J)", "clipping"))
         view.addItem(cmd("Zoom to Fit", "zoomFit", "0", [.command]))
@@ -135,6 +140,7 @@ enum MenuBuilder {
         // Help
         let help = NSMenu(title: "Help")
         help.addItem(cmd("Keyboard Shortcuts", "shortcuts", "/", [.command]))
+        help.addItem(cmd("Clean Up Catalog…", "cleanCatalog"))
         let folder = NSMenuItem(title: "Open Catalog Folder", action: #selector(AppDelegate.openCatalogFolder(_:)), keyEquivalent: "")
         folder.target = t
         help.addItem(folder)

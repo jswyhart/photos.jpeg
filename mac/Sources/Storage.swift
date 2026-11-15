@@ -18,7 +18,7 @@ final class Storage {
     static let imageExtensions = rawExtensions.union(standardExtensions)
     /// Everything the catalog can hold (photos + video)
     static let mediaExtensions = imageExtensions.union(videoExtensions)
-    static let writableExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "json", "mp4", "mov"]
+    static let writableExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "jxl", "dng", "json", "mp4", "mov"]
 
     let fm = FileManager.default
     let root: URL
@@ -76,6 +76,26 @@ final class Storage {
         return out
     }
     func thumbURL(_ id: String) -> URL { thumbsURL.appendingPathComponent(Storage.safeId(id) + ".jpg") }
+
+    /// Catalog clean-up: counts (and, when asked, removes) the files in the thumbnail store that no photo,
+    /// mask, fill or face of the catalog refers to any more. Files written in the last ten minutes are left
+    /// alone: something may be about to refer to them. (There is no RAW cache on the Mac: Core Image develops.)
+    func cleanStore(keep ids: [String], remove: Bool) -> [String: Any] {
+        let keep = Set(ids.map { Storage.safeId($0).lowercased() + ".jpg" })
+        var thumbs = 0, thumbBytes = 0, orphans = 0, orphanBytes = 0, removed = 0
+        let cutoff = Date().addingTimeInterval(-600)
+        let files = (try? FileManager.default.contentsOfDirectory(at: thumbsURL, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? []
+        for f in files {
+            let v = try? f.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = v?.fileSize ?? 0
+            thumbs += 1; thumbBytes += size
+            if keep.contains(f.lastPathComponent.lowercased()) || (v?.contentModificationDate ?? Date()) > cutoff { continue }
+            orphans += 1; orphanBytes += size
+            if remove, (try? FileManager.default.removeItem(at: f)) != nil { removed += 1 }
+        }
+        return ["thumbs": thumbs, "thumbBytes": thumbBytes, "orphans": orphans, "orphanBytes": orphanBytes, "removed": removed,
+                "rawFiles": 0, "rawBytes": 0, "rawRemoved": 0]
+    }
 
     // MARK: Scanning
 

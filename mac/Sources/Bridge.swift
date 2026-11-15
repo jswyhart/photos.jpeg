@@ -107,6 +107,10 @@ final class Bridge: NSObject, WKScriptMessageHandlerWithReply {
                 return true
             }
 
+        case "cleanStore":
+            let keep = a["keep"] as? [String] ?? [], remove = a["remove"] as? Bool ?? false
+            background(reply) { store.cleanStore(keep: keep, remove: remove) }
+
         case "deleteThumb":
             let id = a["id"] as? String ?? ""
             background(reply) {

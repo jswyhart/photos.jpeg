@@ -85,7 +85,7 @@
       saveThumb: (id, bytes) => call('saveThumb', { id, data: b64(bytes) }),
       deleteThumb: (id) => call('deleteThumb', { id }),
       cleanStore: (keep, remove, raw) => call('cleanStore', { keep, remove: !!remove, raw: !!raw }),
-      modelStatus: () => call('modelStatus'), modelFetch: (name) => call('modelFetch', { name }), onModelProgress: (cb) => on('modelProgress', cb),
+      modelStatus: WIN ? () => call('modelStatus') : null, modelFetch: WIN ? (name) => call('modelFetch', { name }) : null, onModelProgress: (cb) => on('modelProgress', cb),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,
       chooseDirectory: (def) => call('chooseDirectory', { path: def || '' }),
@@ -114,7 +114,7 @@
       onOpenPaths: (cb) => { on('openPaths', cb); call('ready').catch(() => { }); },
       // the callback saves; when it resolves to false it has taken the decision to close into its own hands (closeHold / closeNow)
       onFlush: (cb) => on('flush', async () => { let own = false; try { own = (await cb()) === false; } finally { if (!own) call('flushed').catch(() => { }); } }),
-      closeHold: () => call('closeHold'), closeNow: () => call('closeNow'),
+      closeHold: WIN ? () => call('closeHold') : null, closeNow: WIN ? () => call('closeNow') : null,      // the Windows shell only, so far
       onBack: (cb) => on('back', async () => { const handled = await cb(); call('backResult', { handled: !!handled }).catch(() => { }); }),
       getPathForFile: () => '',
       // Files dropped on the window: the host resolves their paths and scans them

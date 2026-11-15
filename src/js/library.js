@@ -137,6 +137,7 @@
     const peoplePanel = UI.panel({
       id: 'l-people', title: 'People',
       actions: h('span', { class: 'panel-actions' },
+        h('button', { title: 'Show the faces on the photo in Develop (click one to name it)', onclick: (e) => { e.stopPropagation(); app.runCommand('toggleFaces'); } }, icon('eye')),
         h('button', { title: 'Find faces in the photos shown (on this computer; nothing is uploaded)', onclick: (e) => { e.stopPropagation(); findFaces(); } }, icon('magnifying-glass')))
     });
     peoplePanel.body.style.padding = '4px 0 8px';
