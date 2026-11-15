@@ -7,7 +7,7 @@
  *
  * Kept from the database: rectilinear lenses that have distortion and/or vignetting
  * calibration, the cameras (for their mount and crop factor) and mount compatibility.
- * Chromatic-aberration data, fisheye lenses and the perspective data are left out — the
+ * Fisheye lenses and the perspective data are left out — the
  * editor doesn't use them.
  *
  * Output (arrays keep the file small):
@@ -15,7 +15,8 @@
  *   mounts:  { mount: [compatible mounts] }
  *   lenses:  [{ mk, m, mo:[mounts], c: crop, ar: aspect ratio,
  *               d: [[focal, model (0 ptlens, 1 poly3, 2 poly5), t0, t1, t2], …],
- *               v: [[focal, aperture, distance, k1, k2, k3], …] }, …]
+ *               v: [[focal, aperture, distance, k1, k2, k3], …],
+ *               t: [[focal, vr, vb, cr, cb, br, bb], …] }, …]        chromatic aberration (poly3; "linear" has only vr, vb)
  */
 const fs = require('fs'), path = require('path');
 const src = process.argv[2];
@@ -75,12 +76,22 @@ for (const file of fs.readdirSync(dbDir).filter(f => f.endsWith('.xml')).sort())
       const focal = num(a.focal), ap = num(a.aperture), dist = num(a.distance, 1000);
       if (focal > 0 && ap > 0) v.push([r5(focal), r5(ap), r5(dist), r5(num(a.k1)), r5(num(a.k2)), r5(num(a.k3))]);
     }
-    if (!d.length && !v.length) { skipped++; continue; }
+    const t = [];
+    for (const m of set.body.matchAll(/<tca\s([^>]*?)\/?>/g)) {
+      const a = attrs(m[1]);
+      const focal = num(a.focal);
+      if (!(focal > 0)) continue;
+      if (a.model === 'poly3') t.push([r5(focal), +num(a.vr, 1).toPrecision(8), +num(a.vb, 1).toPrecision(8), r5(num(a.cr)), r5(num(a.cb)), r5(num(a.br)), r5(num(a.bb))]);
+      else if (a.model === 'linear') t.push([r5(focal), +num(a.kr, 1).toPrecision(8), +num(a.kb, 1).toPrecision(8), 0, 0, 0, 0]);
+    }
+    t.sort((x, y) => x[0] - y[0]);
+    if (!d.length && !v.length && !t.length) { skipped++; continue; }
     d.sort((x, y) => x[0] - y[0]);
     const entry = { mk: makers[makers.length - 1], m: models[0], mo, c: r5(crop) };
     if (Math.abs(ar - 1.5) > 0.001) entry.ar = r5(ar);
     if (d.length) entry.d = d;
     if (v.length) entry.v = v;
+    if (t.length) entry.t = t;
     lenses.push(entry);
   }
 }
@@ -96,7 +107,7 @@ fs.writeFileSync(path.join(outDir, 'lensfun.json'), JSON.stringify(out));
 fs.writeFileSync(path.join(outDir, 'LICENSE.txt'),
 `lensfun.json in this folder is derived from the lens database of the lensfun project
 (https://lensfun.github.io, https://github.com/lensfun/lensfun, data/db/*.xml), converted to
-JSON by tools/lensfun/build-db.js. Only the distortion and vignetting calibrations of
+JSON by tools/lensfun/build-db.js. Only the distortion, vignetting and chromatic-aberration calibrations of
 rectilinear lenses, the camera list and the mount table were kept.
 
 The lensfun database is the work of the lensfun contributors and is licensed under the
@@ -105,4 +116,4 @@ https://creativecommons.org/licenses/by-sa/3.0/
 
 This converted file is distributed under the same licence.
 `);
-console.log(`lensfun ${version}: ${lenses.length} lenses (${lenses.filter(l => l.d).length} with distortion, ${lenses.filter(l => l.v).length} with vignetting), ${cameras.length} cameras, ${Object.keys(mounts).length} mounts; ${skipped} lenses left out; ${(fs.statSync(path.join(outDir, 'lensfun.json')).size / 1e6).toFixed(2)} MB`);
+console.log(`lensfun ${version}: ${lenses.length} lenses (${lenses.filter(l => l.d).length} with distortion, ${lenses.filter(l => l.v).length} with vignetting, ${lenses.filter(l => l.t).length} with chromatic aberration), ${cameras.length} cameras, ${Object.keys(mounts).length} mounts; ${skipped} lenses left out; ${(fs.statSync(path.join(outDir, 'lensfun.json')).size / 1e6).toFixed(2)} MB`);

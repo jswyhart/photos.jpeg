@@ -1,6 +1,6 @@
 lensfun.json in this folder is derived from the lens database of the lensfun project
 (https://lensfun.github.io, https://github.com/lensfun/lensfun, data/db/*.xml), converted to
-JSON by tools/lensfun/build-db.js. Only the distortion and vignetting calibrations of
+JSON by tools/lensfun/build-db.js. Only the distortion, vignetting and chromatic-aberration calibrations of
 rectilinear lenses, the camera list and the mount table were kept.
 
 The lensfun database is the work of the lensfun contributors and is licensed under the

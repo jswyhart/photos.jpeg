@@ -23,6 +23,7 @@ static class Program
         using var mutex = new Mutex(true, InstanceId, out var first);
         if (!first) { Forward(paths); return 0; }
 
+        Log.HookProcess();
         ApplicationConfiguration.Initialize();
         Application.SetColorMode(SystemColorMode.Dark);
         var form = new MainForm(paths);

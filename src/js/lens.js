@@ -3,7 +3,7 @@
  *
  * 1. Lens profiles from the lensfun database (vendor/lensfun/lensfun.json,
  *    CC BY-SA 3.0): the photo's camera and lens are looked up, and the
- *    calibrated distortion (and vignetting, where the database has it) for the
+ *    calibrated distortion, lateral chromatic aberration and vignetting (where the database has them) for the
  *    focal length and aperture used is put into the photo's settings.
  *    Conventions follow lensfun's own code: distortion polynomials are in
  *    Hugin units (r = 1 at half the calibration sensor's short side) and are
@@ -12,7 +12,7 @@
  *    Differences from lensfun: values between calibrated focal lengths are
  *    interpolated linearly (lensfun uses a spline), the focus distance is
  *    taken as far away for vignetting (photos rarely record it), and
- *    chromatic aberration and fisheye lenses are not handled.
+ *    fisheye lenses are not handled.
  *
  * 2. Matching the camera, for lenses the database doesn't have:
  *
@@ -331,6 +331,29 @@
     return Math.abs(corner - 1) < 0.01 ? null : out;      // under 1 % in the corners: nothing to correct
   }
 
+  /** Lateral chromatic aberration at a focal length: { tr, tvr, tvb, tcr, tcb, tbr, tbb } in the pipeline's terms, or null. */
+  function tcaAt(lens, focal, cropCam) {
+    const t = lens.t;
+    if (!t || !t.length || !(focal > 0)) return null;
+    if (focal < t[0][0] * 0.9 || focal > t[t.length - 1][0] * 1.1) return null;
+    let e;
+    if (focal <= t[0][0]) e = t[0].slice(1);
+    else if (focal >= t[t.length - 1][0]) e = t[t.length - 1].slice(1);
+    else {
+      let i = 1; while (t[i][0] < focal) i++;
+      const a = t[i - 1], b = t[i], u = (focal - a[0]) / (b[0] - a[0]);
+      // as lensfun: the two scale terms are interpolated as they are, the others as (coefficient × focal)
+      e = [1, 2, 3, 4, 5, 6].map(k => k <= 2 ? (1 - u) * a[k] + u * b[k] : ((1 - u) * a[k] * a[0] + u * b[k] * b[0]) / focal);
+    }
+    const tr = (cropCam / lens.c) / Math.hypot(lens.ar || 1.5, 1);
+    if (!(tr > 0.2 && tr < 1.5)) return null;
+    // under a tenth of a pixel at the corner of a 24 MP frame: not worth the extra sampling
+    const rc = 1 / tr, shift = (v, c, b) => Math.abs(v + rc * (c + rc * b) - 1);
+    if (Math.max(shift(e[0], e[2], e[4]), shift(e[1], e[3], e[5])) < 3e-5) return null;
+    const r8 = (x) => +x.toPrecision(8), r6 = (x) => +x.toPrecision(6);
+    return { tr: r6(tr), tvr: r8(e[0]), tvb: r8(e[1]), tcr: r6(e[2]), tcb: r6(e[3]), tbr: r6(e[4]), tbb: r6(e[5]) };
+  }
+
   /** Smallest zoom that leaves no empty border after the distortion correction (as a Transform → Scale value). */
   function fillScale(dist, aspect) {
     const f = (r) => 1 + r * (dist.p1 + r * (dist.p2 + r * (dist.p3 + r * dist.p4)));
@@ -360,9 +383,9 @@
     if (!hit) throw new Error(e.lens ? `${e.lens} isn't in the lens database` : 'This photo doesn\'t record its lens, and its camera isn\'t a fixed-lens model in the database');
     const { lens, camera } = hit;
     const cropCam = camera ? camera[3] : lens.c;
-    const dist = distortionAt(lens, e.focalLength, cropCam), vig = vignettingAt(lens, e.focalLength, e.fNumber, cropCam);
+    const dist = distortionAt(lens, e.focalLength, cropCam), vig = vignettingAt(lens, e.focalLength, e.fNumber, cropCam), tca = tcaAt(lens, e.focalLength, cropCam);
     const name = norm(lens.m).startsWith(norm(lens.mk)) ? lens.m : `${lens.mk} ${lens.m}`;
-    if (!dist && !vig) throw new Error(`${name} is in the lens database, but not calibrated for ${e.focalLength ? Math.round(e.focalLength) + ' mm' : 'this focal length'}`);
+    if (!dist && !vig && !tca) throw new Error(`${name} is in the lens database, but not calibrated for ${e.focalLength ? Math.round(e.focalLength) + ' mm' : 'this focal length'}`);
     const s = photo.settings, hadProfile = !!s.lens.pr;
     s.lens.profile = name;
     s.lens.distortion = 0;                      // the profile replaces a measured or hand-set correction
@@ -372,17 +395,20 @@
       if (hadProfile || Math.abs((s.transform.scale || 100) - 100) < 0.05) s.transform.scale = fillScale(dist, Math.max(w, h) / Math.min(w, h));
     } else Object.assign(s.lens, { pr: 0, p1: 0, p2: 0, p3: 0, p4: 0 });
     Object.assign(s.lens, vig || { vq: 0, v1: 0, v2: 0, v3: 0 });
-    return `${name}: ${[dist ? 'distortion' : '', vig ? 'vignetting' : ''].filter(Boolean).join(' and ')} corrected${e.focalLength ? ` for ${Math.round(e.focalLength * 10) / 10} mm` : ''}${dist && !vig ? ' (no vignetting data for this lens)' : ''}`;
+    Object.assign(s.lens, tca || NO_TCA);
+    const done = [dist ? 'distortion' : '', tca ? 'colour fringing' : '', vig ? 'vignetting' : ''].filter(Boolean);
+    return `${name}: ${done.length > 1 ? done.slice(0, -1).join(', ') + ' and ' + done[done.length - 1] : done[0]} corrected${e.focalLength ? ` for ${Math.round(e.focalLength * 10) / 10} mm` : ''}${!vig ? ' (no vignetting data for this lens)' : ''}`;
   }
+  const NO_TCA = { tr: 0, tvr: 1, tvb: 1, tcr: 0, tcb: 0, tbr: 0, tbb: 0 };
   /** Take a database profile off again. */
   function removeProfile(photo) {
     const s = photo.settings;
     if (s.lens.pr) s.transform.scale = 100;
-    Object.assign(s.lens, { profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0 });
+    Object.assign(s.lens, { profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0 }, NO_TCA);
   }
 
   global.PJ.Lens = {
     profileKey, lensLabel, stored, store, measure, applyTo, describe, applyDatabaseProfile, removeProfile, database,
-    _test: { grayOf, matchPatches, fitRadial, findLens, findCamera, distortionAt, vignettingAt, fillScale, nameScore }
+    _test: { grayOf, matchPatches, fitRadial, findLens, findCamera, distortionAt, vignettingAt, tcaAt, fillScale, nameScore }
   };
 })(window);

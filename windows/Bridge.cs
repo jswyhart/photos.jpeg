@@ -58,6 +58,8 @@ public sealed class Bridge
         }
         catch (Exception ex)
         {
+            // expected refusals (a cancelled dialog is not one: that returns null) are worth a line, not a stack trace
+            Log.Warn($"bridge call {id} failed: {(ex is IOException ? ex.Message : ex.ToString())}");
             try { web.PostWebMessageAsJson(JsonSerializer.Serialize(new { id, error = ex.Message })); } catch { /* closing */ }
         }
     }
@@ -269,6 +271,19 @@ public sealed class Bridge
 
             // ---------------- lifecycle ----------------
             case "ready": form.RendererReady(); return true;
+            case "log":
+            {
+                // errors the editor reports about itself
+                var level = S(a, "level", "error");
+                Log.Write(level == "warn" ? "warn" : level == "info" ? "info" : "ERROR", "[editor] " + S(a, "text"));
+                return true;
+            }
+            case "showLog":
+            {
+                Log.Info("log opened from the Help menu");
+                Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true });
+                return true;
+            }
             case "checkForUpdates": form.BeginInvoke(() => form.CheckForUpdates(true)); return true;
             case "exportPresets":
             {

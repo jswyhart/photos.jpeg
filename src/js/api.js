@@ -105,6 +105,8 @@
       openPresetFiles: () => call('openPresetFiles'),
       onMenu: (cb) => on('menu', cb),
       onNotice: (cb) => on('notice', cb),
+      onCard: (cb) => on('card', cb),      // a camera card was put in: { path, label }
+      log: WIN ? (level, text) => call('log', { level, text: String(text).slice(0, 4000) }).catch(() => { }) : null,
       checkForUpdates: WIN ? () => call('checkForUpdates') : null,   // same as Help → Check for Updates   // a line of text from the app shell (an update is available …)
       setExportPresets: WIN ? (items) => call('exportPresets', { items }).catch(() => { }) : null,   // File → Export with Preset
       onOpenPaths: (cb) => { on('openPaths', cb); call('ready').catch(() => { }); },

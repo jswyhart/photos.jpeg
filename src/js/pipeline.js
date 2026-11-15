@@ -39,7 +39,12 @@
       // r in units of pr × the half-diagonal; pr 0 = no profile. distortion / vignette are the manual sliders.
       // vq…v3: the profile's vignetting — the lens leaves 1 + v1·q + v2·q² + v3·q³ of the light at q = vq × (r / half-diagonal)²,
       // and the correction divides by it; vq 0 = none.
-      lens: { distortion: 0, vignette: 0, vigMid: 50, profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0 },
+      // tr…tbb: the profile's lateral chromatic aberration — red and blue are read from the sensor at radius × (tv + tc·r + tb·r²),
+      // r in units of tr × the half-diagonal; tr 0 = none.
+      lens: {
+        distortion: 0, vignette: 0, vigMid: 50, profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0,
+        tr: 0, tvr: 1, tvb: 1, tcr: 0, tcb: 0, tbr: 0, tbb: 0
+      },
       transform: { vertical: 0, horizontal: 0, rotate: 0, aspect: 0, scale: 100, offX: 0, offY: 0 },
       effects: { vigAmount: 0, vigMid: 50, vigRound: 0, vigFeather: 50, vigHighlights: 0, grain: 0, grainSize: 25, grainRough: 50 },
       calib: { shadowTint: 0, redHue: 0, redSat: 0, greenHue: 0, greenSat: 0, blueHue: 0, blueSat: 0 },
@@ -783,8 +788,21 @@
   /* Main render (split into stage functions so V8 optimizes each loop)  */
   /* ------------------------------------------------------------------ */
 
-  function stageGeometry(d, W, H, geo, reg, w, h, R, G, B, SX, SY, VF, lensVig, vigMid, pv) {
+  /** One channel of an RGBA image at a fractional position (bilinear, edges repeated). */
+  function sampleChannel(d, W, H, sx, sy, ch) {
+    let fx = sx - 0.5, fy = sy - 0.5;
+    if (fx < 0) fx = 0; else if (fx > W - 1) fx = W - 1;
+    if (fy < 0) fy = 0; else if (fy > H - 1) fy = H - 1;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), x1 = x0 + 1 < W ? x0 + 1 : x0, y1 = y0 + 1 < H ? y0 + 1 : y0;
+    const tx = fx - x0, ty = fy - y0;
+    const a = d[((y0 * W + x0) << 2) + ch], b = d[((y0 * W + x1) << 2) + ch], c = d[((y1 * W + x0) << 2) + ch], e = d[((y1 * W + x1) << 2) + ch];
+    return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + e * tx) * ty;
+  }
+
+  function stageGeometry(d, W, H, geo, reg, w, h, R, G, B, SX, SY, VF, lensVig, vigMid, pv, tc) {
     const vq = pv ? pv[0] : 0, v1 = pv ? pv[1] : 0, v2 = pv ? pv[2] : 0, v3 = pv ? pv[3] : 0;
+    // lens profile: colour fringing (red and blue are a slightly different size from green on the sensor)
+    const tcaInv = tc ? 1 / (tc[0] * Math.sqrt((W * W + H * H) / 4)) : 0;
     const bg = 0.11, inv = 1 / 255;
     const p = [0, 0];
     const affine = !geo.nonlinear;
@@ -798,7 +816,7 @@
     }
     // Fast path: pure pixel copy (no crop offset fraction, no rotation/scale)
     const identity = affine && ax === 1 && ay === 0 && bx === 0 && by === 1 &&
-      Math.abs(ox0 - 0.5 - Math.round(ox0 - 0.5)) < 1e-6 && Math.abs(oy0 - 0.5 - Math.round(oy0 - 0.5)) < 1e-6 && !SX && !VF;
+      Math.abs(ox0 - 0.5 - Math.round(ox0 - 0.5)) < 1e-6 && Math.abs(oy0 - 0.5 - Math.round(oy0 - 0.5)) < 1e-6 && !SX && !VF && !tc;
     if (identity) {
       const sx0 = Math.round(ox0 - 0.5), sy0 = Math.round(oy0 - 0.5);
       for (let j = 0, i = 0; j < h; j++) {
@@ -834,6 +852,12 @@
         R[i] = (d[i00] * w00 + d[i10] * w10 + d[i01] * w01 + d[i11] * w11) * inv;
         G[i] = (d[i00 + 1] * w00 + d[i10 + 1] * w10 + d[i01 + 1] * w01 + d[i11 + 1] * w11) * inv;
         B[i] = (d[i00 + 2] * w00 + d[i10 + 2] * w10 + d[i01 + 2] * w01 + d[i11 + 2] * w11) * inv;
+        if (tcaInv) {
+          const dx = sx - W / 2, dy = sy - H / 2, r = Math.sqrt(dx * dx + dy * dy) * tcaInv;
+          const fr = tc[1] + r * (tc[3] + r * tc[5]), fb = tc[2] + r * (tc[4] + r * tc[6]);
+          R[i] = sampleChannel(d, W, H, W / 2 + dx * fr, H / 2 + dy * fr, 0) * inv;
+          B[i] = sampleChannel(d, W, H, W / 2 + dx * fb, H / 2 + dy * fb, 2) * inv;
+        }
         if (VF !== null) {
           const rr = ((sx - vcx) * (sx - vcx) + (sy - vcy) * (sy - vcy)) / vr2;
           let vf = lensVig ? 1 + lensVig * 1.4 * smoothstep(vmid * 0.5, 1.0, rr) : 1;
@@ -926,7 +950,7 @@
     const d = s.detail || {};
     if (d.sharpen > 0) r = Math.max(r, 4 * Math.max(d.radius || 1, 2.5) * Math.max(0.5, rs || 1) + 4);
     if (d.nrLuma > 0 || d.nrColor > 0) r = Math.max(r, 4 * 5.6 * Math.max(0.5, rs || 1) + 4);
-    if (s.lens && (s.lens.distortion || s.lens.pr)) r = Math.max(r, 2);
+    if (s.lens && (s.lens.distortion || s.lens.pr || s.lens.tr)) r = Math.max(r, 3);
     return Math.min(400, Math.ceil(r));
   }
 
@@ -1243,7 +1267,8 @@
     const VF = lensVig || profVig ? new Float32Array(N) : null;
 
     // 1. Geometry resample
-    stageGeometry(sdata, W, H, geo, reg, w, h, R, G, B, SX, SY, VF, lensVig, s.lens.vigMid, profVig);
+    const tca = s.lens.tr > 0 ? [s.lens.tr, +s.lens.tvr || 1, +s.lens.tvb || 1, +s.lens.tcr || 0, +s.lens.tcb || 0, +s.lens.tbr || 0, +s.lens.tbb || 0] : null;
+    stageGeometry(sdata, W, H, geo, reg, w, h, R, G, B, SX, SY, VF, lensVig, s.lens.vigMid, profVig, tca);
     const cube = opts.cube && s.lut && s.lut.id && s.lut.id === opts.cube.id && s.lut.amount > 0 ? opts.cube : null;
     if (cube && s.lut.stage === 'input') applyCube(R, G, B, N, cube, s.lut.amount / 100);
     else if (s.input && s.input.profile !== 'none') stageInput(R, G, B, N, s.input);

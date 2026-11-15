@@ -122,7 +122,7 @@
   }
   uniform vec3 uGain;            // WB * exposure
   uniform mat3 uCalib; uniform bool uHasCalib;
-  uniform float uLensVig, uLensMid; uniform vec4 uProfVig;
+  uniform float uLensVig, uLensMid; uniform vec4 uProfVig; uniform float uTcaR; uniform vec2 uTcaV, uTcaC, uTcaB;
   uniform bool uLocalLin;
   out vec4 frag;
 
@@ -131,6 +131,12 @@
     vec2 s = toSource(o);
     vec3 c; bool inside = !(s.x < -0.5 || s.y < -0.5 || s.x > uSrcSize.x + 0.5 || s.y > uSrcSize.y + 0.5);
     vec3 raw = inside ? texture(uSrc, s / uSrcSize).rgb : vec3(0.11);
+    if (inside && uTcaR != 0.0) {
+      // lens profile: red and blue are read where the lens actually put them
+      vec2 cen = uSrcSize * 0.5, dd = s - cen; float tr = length(dd) / uTcaR;
+      raw.r = texture(uSrc, (cen + dd * (uTcaV.x + tr * (uTcaC.x + tr * uTcaB.x))) / uSrcSize).r;
+      raw.b = texture(uSrc, (cen + dd * (uTcaV.y + tr * (uTcaC.y + tr * uTcaB.y))) / uSrcSize).b;
+    }
     vec3 lin;
     if (uCubeIn && inside) {
       vec3 cc = clamp(raw, 0.0, 1.0);
@@ -678,6 +684,8 @@
       if (M) gl.uniformMatrix3fv(pr.locs.uCalib, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]);
       gl.uniform1f(pr.locs.uLensVig, (s.lens.vignette || 0) / 100);
       gl.uniform1f(pr.locs.uLensMid, 0.2 + (s.lens.vigMid / 100) * 0.6);
+      gl.uniform1f(pr.locs.uTcaR, s.lens.tr > 0 ? s.lens.tr * 0.5 * Math.hypot(this.srcW, this.srcH) : 0);
+      gl.uniform2f(pr.locs.uTcaV, +s.lens.tvr || 1, +s.lens.tvb || 1); gl.uniform2f(pr.locs.uTcaC, +s.lens.tcr || 0, +s.lens.tcb || 0); gl.uniform2f(pr.locs.uTcaB, +s.lens.tbr || 0, +s.lens.tbb || 0);
       const pv = s.lens.vq > 0 && (s.lens.v1 || s.lens.v2 || s.lens.v3);
       gl.uniform4f(pr.locs.uProfVig, pv ? s.lens.vq : 0, +s.lens.v1 || 0, +s.lens.v2 || 0, +s.lens.v3 || 0);
       const localKeys = (k) => masks.some(m => m.adj && m.adj[k]);

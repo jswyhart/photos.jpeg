@@ -225,6 +225,7 @@
     const added = Cat.addPhotos(supported);
     const dup = supported.length - added.length;
     if (!added.length) { UI.toast(`All ${dup} photo(s) are already in the catalog`, 'circle-info'); return []; }
+    if (Cat.pref('lens.autoProfile', false)) added.forEach(p => { if (p.kind !== 'video') p.autoLens = true; });
     library.setLastImport(added.map(p => p.id));
     library.setSource('recent');
     refresh();
@@ -259,7 +260,7 @@
     const name = { keep: stem, 'date-seq': `${y}${m}${d}-${num}`, 'date-name': `${y}-${m}-${d}_${stem}`, custom: `${custom}-${num}` }[o.names] || stem;
     return { dir: API.joinPath(o.dest, ...sub), name, shown: [...sub, name + desc.name.slice(stem.length)].join(' / ') };
   }
-  async function importOrganize() {
+  async function importOrganize(fromFolder) {
     if (!API.importFile) return UI.toast('Import and Organize is available in the Windows app', 'circle-info');
     const o = Object.assign({ dest: '', folders: 'ymd', names: 'keep', custom: '', move: false }, Cat.pref('import.organize', {}));
     let descs = [];
@@ -300,6 +301,8 @@
     const goBtn = m.footer.querySelector('.btn.primary');
     o.move = String(o.move);
     refresh();
+    // opened for a camera card: its photos are already chosen
+    if (typeof fromFolder === 'string' && fromFolder) { count.textContent = 'Looking at the card…'; descs = await supported(await API.scanPaths([fromFolder])); refresh(); }
 
     async function run() {
       const opts = { ...o, move: o.move === 'true' || o.move === true };
@@ -756,6 +759,9 @@
         h('h4', null, 'Performance'),
         row('GPU previews', gpu.off ? 'Not available on this computer (no hardware WebGL2)' : 'Sliders render on the graphics card while you drag; the final image is always rendered exactly.', chk('gpu.preview', true)),
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
+        h('h4', null, 'Import'),
+        row('Apply lens profiles on import', 'New photos get the distortion and vignetting correction for their lens from the lens database.', chk('lens.autoProfile', false)),
+        row('Offer to import camera cards', 'Asks when a card or camera with photos is connected (Windows app).', chk('import.detectCards', true)),
         h('h4', null, 'Lightroom compatibility'),
         row('Read .xmp sidecars on import', 'Picks up Lightroom / Camera Raw edits, ratings, labels and keywords.', chk('xmp.readOnImport', true)),
         row('Automatically write .xmp sidecars', 'Keeps a sidecar next to each original up to date as you edit.', chk('xmp.autoWrite', false)),
@@ -993,6 +999,36 @@
       if (i >= 0) E.prefetch([visibleList[i + 1], visibleList[i - 1]]);
     });
     if (API.onNotice) API.onNotice((text) => UI.toast(String(text), 'circle-info'));
+    // "Apply lens profiles on import": a new photo gets its profile as soon as its camera data has been read
+    Cat.events.on('meta', async (list) => {
+      for (const p of list || []) {
+        if (!p.autoLens || !p.exifLoaded) continue;
+        delete p.autoLens;
+        if (p.settings.lens.profile || p.history.length > 1) continue;      // already profiled, or already being edited
+        const before = P.clone(p.settings);
+        try { await PJ.Lens.applyDatabaseProfile(p); Cat.commit(p, 'Lens profile'); afterSettings(p); }
+        catch (_) { p.settings = before; }                                  // not in the database: leave the photo as it is
+      }
+    });
+    // a camera card was put in (or was in at start-up)
+    if (API.onCard) API.onCard((card) => {
+      if (!card || !card.path || Cat.pref('import.detectCards', true) === false || UI.hasModal()) return;
+      UI.modal({
+        title: 'Camera card found', icon: 'sd-card',
+        body: h('div', { style: { lineHeight: 1.6 } }, h('p', null, `${card.label || 'A camera card'} has photos on it. Copy them to your computer and add them to the catalog?`),
+          h('p', { class: 'muted' }, 'You choose the destination, folders and file names in the next step. Preferences turns this prompt off.')),
+        buttons: [{ label: 'Not now' }, { label: 'Import…', primary: true, onClick: () => { setTimeout(() => importOrganize(card.path), 0); } }]
+      });
+    });
+    // errors the editor runs into go to the app's log (Help → Show Log)
+    if (API.log) {
+      let sent = 0;
+      const report = (level, text) => { if (sent++ < 200) API.log(level, text); };
+      window.addEventListener('error', (e) => report('error', `${e.message} at ${(e.filename || '').split('/').pop()}:${e.lineno}`));
+      window.addEventListener('unhandledrejection', (e) => report('error', 'Unhandled rejection: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
+      const ce = console.error;
+      console.error = function (...a) { report('error', a.map(x => x && (x.stack || x.message) || String(x)).join(' ')); return ce.apply(console, a); };
+    }
     API.onOpenPaths(async (paths) => {
       const descs = await API.scanPaths(paths);
       // "Open with photos.jpeg" on a file that is already in the catalog opens that photo

@@ -79,6 +79,7 @@ public sealed class MainForm : Form
         };
         var env = await CoreWebView2Environment.CreateAsync(null, Storage.WebViewDataDir, options);
         await web.EnsureCoreWebView2Async(env);
+        Log.Info($"photos.jpeg {Updater.Current.ToString(3)} started — Windows {Environment.OSVersion.Version}, WebView2 {env.BrowserVersionString}, {Environment.ProcessorCount} logical processors, data in {Storage.Root}");
         // The page titles itself "<photo> — photos.jpeg": show that in the title bar, taskbar and Alt+Tab
         web.CoreWebView2.DocumentTitleChanged += (_, _) =>
         {
@@ -114,6 +115,7 @@ public sealed class MainForm : Form
         core.NewWindowRequested += (_, e) => { e.Handled = true; OpenExternal(e.Uri); };
         core.ProcessFailed += (_, e) =>
         {
+            Log.Error($"web view process failed: {e.ProcessFailedKind}, reason {e.Reason}, exit code {e.ExitCode}, {e.ProcessDescription}");
             if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited && !closing) { rendererReady = false; core.Reload(); }
         };
         core.Navigate(ResourceServer.Origin + "/index.html");
@@ -127,12 +129,57 @@ public sealed class MainForm : Form
 
     // ---------------- bridge callbacks ----------------
 
+    // ---------------- camera cards ----------------
+
+    const int WM_DEVICECHANGE = 0x0219, DBT_DEVICEARRIVAL = 0x8000;
+    readonly HashSet<string> cardsSeen = new(StringComparer.OrdinalIgnoreCase);
+    readonly System.Windows.Forms.Timer cardTimer = new() { Interval = 1500 };
+
+    protected override void WndProc(ref Message m)
+    {
+        // a drive appeared: give Windows a moment to mount it, then look for a camera card
+        if (m.Msg == WM_DEVICECHANGE && m.WParam == DBT_DEVICEARRIVAL) { cardTimer.Stop(); cardTimer.Start(); }
+        base.WndProc(ref m);
+    }
+
+    /// <summary>
+    /// Removable drives with a DCIM folder — what a camera or its card looks like. Each is
+    /// announced to the editor once per session (PJ_CARD_ROOTS lists extra folders to treat as cards, for testing).
+    /// </summary>
+    void LookForCards()
+    {
+        cardTimer.Stop();
+        if (!rendererReady) return;
+        var roots = new List<(string Path, string Label)>();
+        try
+        {
+            foreach (var d in DriveInfo.GetDrives())
+            {
+                if (d.DriveType != DriveType.Removable || !d.IsReady) continue;
+                if (Directory.Exists(Path.Combine(d.RootDirectory.FullName, "DCIM"))) roots.Add((d.RootDirectory.FullName, string.IsNullOrWhiteSpace(d.VolumeLabel) ? d.Name.TrimEnd('\\') : $"{d.VolumeLabel} ({d.Name.TrimEnd('\\')})"));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Warn("looking for camera cards: " + ex.Message); }
+        foreach (var extra in (Environment.GetEnvironmentVariable("PJ_CARD_ROOTS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+            if (Directory.Exists(Path.Combine(extra, "DCIM"))) roots.Add((extra, Path.GetFileName(extra.TrimEnd('\\'))));
+        foreach (var (path, label) in roots)
+        {
+            if (!cardsSeen.Add(path)) continue;
+            Log.Info("camera card found: " + path);
+            bridge?.SendEvent("card", new { path = Path.Combine(path, "DCIM"), label });
+        }
+    }
+
     public void RendererReady()
     {
         rendererReady = true;
+        cardTimer.Tick -= OnCardTimer; cardTimer.Tick += OnCardTimer;
+        cardTimer.Start();                       // a card that was already in when the app started
         if (Updater.DueForCheck()) CheckForUpdates(false);
         if (pendingOpen.Count > 0) { bridge?.SendEvent("openPaths", pendingOpen.ToArray()); pendingOpen.Clear(); }
     }
+
+    void OnCardTimer(object? sender, EventArgs e) => LookForCards();
 
     /// <summary>"Open with", a second launch, or files dragged onto the exe.</summary>
     public void OpenPaths(IReadOnlyCollection<string> paths)
@@ -392,6 +439,7 @@ public sealed class MainForm : Form
                 Cmd("Keyboard Shortcuts", "shortcuts", "Ctrl+/"),
                 Cmd("About photos.jpeg", "about"),
                 updateItem,
+                Item("Show Log", () => { Log.Info("log opened from the Help menu"); try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch (Exception ex) { Log.Error("opening the log", ex); } }),
                 Item("Open Catalog Folder", () => Process.Start(new ProcessStartInfo(Storage.Root) { UseShellExecute = true })))
         ]);
     }
