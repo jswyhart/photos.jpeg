@@ -261,17 +261,28 @@
     if (uSharpAmt > 0.0 || uNrLuma > 0.0 || uNrColor > 0.0) {
       vec2 px = 1.0 / uP1Size;
       float sig = max(0.5, uSharpRad);
+      // noise reduction for the live preview: an edge-aware (bilateral) mean over two rings of
+      // neighbours — close to what the wavelet method of the final render does at this size
+      float nT = 0.085 * uNrLuma * (1.25 - 0.6 * Y) * (1.6 - uNrDetail * 0.6), Yn = 0.0, wn = 0.0;
       for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
         float w = exp(-0.5 * float(i*i + j*j) / (sig*sig));
         vec3 q = texture(uP1, uv + vec2(float(i), float(j)) * px).rgb;
-        Yb += luma(q) * w; Cb += q * w; wb += w;
+        float yq = luma(q);
+        Yb += yq * w; Cb += q * w; wb += w;
+        if (uNrLuma > 0.0) {
+          float dy = (yq - Y) / max(nT, 1e-5);
+          float wq = exp(-0.5 * float(i*i + j*j) / 3.0) * exp(-0.5 * dy * dy);
+          Yn += yq * wq; wn += wq;
+          // a wider ring for the coarse blotches
+          float yf = luma(texture(uP1, uv + vec2(float(i), float(j)) * px * 3.0).rgb), df = (yf - Y) / max(nT * 0.7, 1e-5);
+          float wf = 0.5 * exp(-0.5 * float(i*i + j*j) / 3.0) * exp(-0.5 * df * df);
+          Yn += yf * wf; wn += wf;
+        }
       }
       Yb /= wb; Cb /= wb;
       if (uNrLuma > 0.0) {
-        float dd = Yb - Y;
-        float edge = 0.02 - uNrDetail*0.015 + uNrLuma*0.06;
-        float t = uNrLuma * (1.0 - sstep(edge*0.5, edge*1.6, abs(dd)));
-        c += dd * t; Y += dd * t;
+        float dd = Yn / wn - Y;
+        c += dd; Y += dd;
       }
       if (uNrColor > 0.0) {
         vec3 chromaC = c - Y, chromaB = Cb - luma(Cb);
