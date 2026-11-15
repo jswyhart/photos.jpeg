@@ -178,6 +178,8 @@ public sealed class ResourceServer(CoreWebView2 web, string version)
             if (rel == "") rel = "index.html";
             var full = Path.GetFullPath(Path.Combine(WebRoot, rel));
             if (!full.StartsWith(WebRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return Fail(403);
+            // a model that this build does not carry but that has been downloaded (Models.cs)
+            if (!File.Exists(full) && rel.StartsWith("vendor/ml/", StringComparison.OrdinalIgnoreCase) && Models.Find(Path.GetFileName(rel)) is { } got) full = got;
             return File.Exists(full) ? new Reply(200, File.ReadAllBytes(full), Mime(full)) : Fail(404);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

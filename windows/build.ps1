@@ -14,6 +14,7 @@ param(
     [switch]$Small,
     [switch]$Zip,
     [switch]$Installer,
+    [switch]$Lite,                                           # leave the neural-network models out; the app downloads each when it is first needed
     [string]$Sign,                                           # thumbprint of a code-signing certificate in your certificate store
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
     [ValidateSet('x64', 'arm64')][string]$Arch = 'x64'
@@ -28,6 +29,7 @@ $selfContained = if ($Small) { 'false' } else { 'true' }
 dotnet publish PhotosJpeg.csproj -c Release -r "win-$Arch" --self-contained $selfContained -o $out -nologo -p:DebugType=none
 if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
 Get-ChildItem $out -Filter *.xml | Remove-Item -Force   # API docs of the WebView2 package
+if ($Lite) { Get-ChildItem (Join-Path $out 'web\vendor\ml') -Filter *.onnx | Remove-Item -Force }
 
 # Code signing (-Sign <thumbprint>): the app, the uninstaller and the Setup program are signed with a
 # certificate from the Windows certificate store, so SmartScreen and Controlled folder access can
@@ -64,7 +66,7 @@ if ($Installer) {
     [System.IO.Compression.ZipFile]::CreateFromDirectory($out, $payload, [System.IO.Compression.CompressionLevel]::Optimal, $false)
     if (Test-Path $uninstaller) { Remove-Item $uninstaller -Force }
 
-    $setup = Join-Path $PSScriptRoot "build\photos.jpeg-Setup-$version-$Arch.exe"
+    $setup = Join-Path $PSScriptRoot ("build\photos.jpeg-Setup-$version-$Arch" + $(if ($Lite) { '-lite' } else { '' }) + '.exe')
     $dst = [System.IO.File]::Create($setup)
     try {
         foreach ($part in $stub, $payload) {

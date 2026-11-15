@@ -85,6 +85,7 @@
       saveThumb: (id, bytes) => call('saveThumb', { id, data: b64(bytes) }),
       deleteThumb: (id) => call('deleteThumb', { id }),
       cleanStore: (keep, remove, raw) => call('cleanStore', { keep, remove: !!remove, raw: !!raw }),
+      modelStatus: () => call('modelStatus'), modelFetch: (name) => call('modelFetch', { name }), onModelProgress: (cb) => on('modelProgress', cb),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,
       chooseDirectory: (def) => call('chooseDirectory', { path: def || '' }),

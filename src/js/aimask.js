@@ -56,26 +56,57 @@
     return worker;
   }
   /** Run a model on a prepared input; resolves to { data, dims }. */
-  function infer(model, input) {
-    const M = MODELS[model];
+  function infer(model, input, again) {
+    const M = MODELS[model], spare = again ? null : input.slice();
     return new Promise((resolve, reject) => {
       const id = ++seq;
       waiting.set(id, { resolve, reject });
       modelWorker().postMessage({ id, model, file: M.file, size: M.size, input }, [input.buffer]);
-    }).catch((e) => {
+    }).catch(async (e) => {
       const msg = String(e && e.message || e);
+      if (spare && MISSING.test(msg)) {
+        let got = false;
+        try { got = await obtain(M.file); } catch (d) { throw new Error(`${M.file} could not be downloaded: ${d && d.message || d}`); }
+        if (got) return infer(model, spare, true);
+      }
       throw new Error(/404|Failed to fetch|no such file|failed to load/i.test(msg) ? `The model for this mask (${M.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The mask model could not be started: ' + msg);
     });
   }
 
+  /* A build without the models ("lite") fetches each the first time it is needed — after asking. */
+  const MISSING = /404|Failed to fetch|no such file|failed to load/i;
+  const fetching = new Map();
+  let progressHooked = false;
+  function obtain(file) {
+    if (!API.modelFetch) return Promise.resolve(false);
+    if (!fetching.has(file)) {
+      fetching.set(file, (async () => {
+        const list = await API.modelStatus().catch(() => []), it = list.find(m => m.name === file);
+        if (!it || it.have) return !!it;          // not ours, or there after all
+        const ok = await PJ.UI.confirm('Download a model?', `This needs a file that is not installed yet (${(it.size / 1048576).toFixed(it.size < 2097152 ? 1 : 0)} MB). It is downloaded once from the photos.jpeg repository on GitHub and kept on this computer; your photos are not sent anywhere.`, 'Download');
+        if (!ok) return false;
+        if (!progressHooked && API.onModelProgress) { progressHooked = true; API.onModelProgress((p) => PJ.UI.activity(`Downloading ${p.name}…`, p.frac)); }
+        PJ.UI.activity(`Downloading ${file}…`, 0);
+        try { await API.modelFetch(file); return true; }
+        finally { PJ.UI.activity('', 0); }
+      })().finally(() => fetching.delete(file)));
+    }
+    return fetching.get(file);
+  }
   /** Run any model of vendor/ml in the models' thread: { model (a name to keep it loaded under), file, input, dims, all }. */
-  function runModel(job) {
+  function runModel(job, again) {
+    const spare = again ? null : job.input.slice();
     return new Promise((resolve, reject) => {
       const id = ++seq;
       waiting.set(id, { resolve, reject });
       modelWorker().postMessage(Object.assign({ id }, job), [job.input.buffer]);
-    }).catch((e) => {
+    }).catch(async (e) => {
       const msg = String(e && e.message || e);
+      if (spare && MISSING.test(msg)) {
+        let got = false;
+        try { got = await obtain(job.file); } catch (d) { throw new Error(`${job.file} could not be downloaded: ${d && d.message || d}`); }
+        if (got) return runModel(Object.assign({}, job, { input: spare }), true);
+      }
       throw new Error(/404|Failed to fetch|no such file|failed to load model/i.test(msg) ? `A model this needs (${job.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The model could not be started: ' + msg);
     });
   }

@@ -127,6 +127,12 @@ public sealed class Bridge
                 await Task.Run(() => Storage.WriteAtomic(Storage.ThumbPath(id), data));
                 return true;
             }
+            case "modelStatus": return Models.Status();
+            case "modelFetch":
+            {
+                var name = S(a, "name");
+                return await Models.Fetch(name, f => form.BeginInvoke(() => SendEvent("modelProgress", new { name, frac = f })));
+            }
             case "cleanStore":
             {
                 var keep = Strings(a, "keep");
