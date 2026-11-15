@@ -7,7 +7,9 @@
  * points, into 128 numbers that are close together for the same person.
  *
  * A photo keeps its faces as  photo.faces = [{ b, q, v, t, p?, x? }]:
- *   b  the box, as fractions of the upright picture [x, y, w, h]
+ *   b  the box, as fractions of the photo as it comes from the file [x, y, w, h] — the frame masks and
+ *      spots use, so it can be drawn on the photo whatever its crop and rotation
+ *   m  true for a face that was marked by hand
  *   q  how sure the detector was (0…1)
  *   v  the 128 numbers, as 8-bit values in base64
  *   t  the key of a small picture of the face in the thumbnail store
@@ -21,7 +23,7 @@
 (function (global) {
   'use strict';
   const P = PJ.Pipeline, API = PJ.API, Cat = PJ.Catalog;
-  const VERSION = 1;
+  const VERSION = 2;              // 2: boxes are in the source photo's own frame (before rotation, crop and geometry)
   const DET = { model: 'facedet', file: 'face_detection_yunet_2023mar.onnx', size: 640 };
   const REC = { model: 'facerec', file: 'face_recognition_sface_2021dec.onnx', size: 112 };
   const MIN_SCORE = 0.7;          // detector confidence below which a face is not kept
@@ -139,30 +141,52 @@
   /* ---------------- looking through photos ---------------- */
   const canScan = (p) => p && p.kind !== 'video' && !p.missing;
   const scanned = (p) => p.facesV === VERSION;
+  /* The photo turned by a number of quarter turns clockwise, and points taken there and back.
+     Faces are looked for with the photo upright (the networks expect that) but kept in the photo's own frame. */
+  function turned(base, a) {
+    if (!a) return base;
+    const W = base.width, H = base.height, c = PJ.Decode.makeCanvas(a === 2 ? W : H, a === 2 ? H : W), x = c.getContext('2d');
+    if (a === 1) x.setTransform(0, 1, -1, 0, H, 0); else if (a === 2) x.setTransform(-1, 0, 0, -1, W, H); else x.setTransform(0, -1, 1, 0, 0, W);
+    x.drawImage(base, 0, 0);
+    return c;
+  }
+  const toTurned = (a, x, y, W, H) => a === 1 ? [H - y, x] : a === 2 ? [W - x, H - y] : a === 3 ? [y, W - x] : [x, y];
+  const fromTurned = (a, x, y, W, H) => a === 1 ? [y, H - x] : a === 2 ? [W - x, H - y] : a === 3 ? [W - y, x] : [x, y];
+  /** The photo as developed, in its own frame, plus the quarter turns to try so that faces stand upright. */
+  async function upright(photo) {
+    const res = await PJ.Engine.render(photo, P.defaultSettings(), 'proxy', {}, 0, 'any');
+    if (!res) throw new Error('The photo could not be rendered');
+    const base = PJ.Engine.toCanvas(res), t = (((photo.settings.geo.orient || 0) % 4) + 4) % 4;
+    return { base, turns: [...new Set([t, 0, (4 - t) % 4, 2])] };
+  }
+  async function saveCrop(face, crop) {
+    if (!API.hasThumbStore || !API.saveThumb) return;
+    try {
+      const blob = crop.convertToBlob ? await crop.convertToBlob({ type: 'image/jpeg', quality: 0.82 }) : await new Promise(r => crop.toBlob(r, 'image/jpeg', 0.82));
+      face.t = Cat.uid('fc');
+      await API.saveThumb(face.t, new Uint8Array(await blob.arrayBuffer()));
+    } catch (e) { delete face.t; }
+  }
   /** Find and describe the faces of one photo; stores them on the photo. Resolves to the number found. */
   async function scanPhoto(photo) {
-    const s = P.defaultSettings(); s.geo.orient = photo.settings.geo.orient;
-    const res = await PJ.Engine.render(photo, s, 'proxy', {}, 0, 'any');
-    if (!res) throw new Error('The photo could not be rendered');
-    const src = PJ.Engine.toCanvas(res);
-    const found = await detect(src), faces = [];
+    const { base, turns } = await upright(photo), W = base.width, H = base.height;
+    let src = base, a = 0, found = [];
+    for (const t of turns) { const c = turned(base, t), f = await detect(c); if (f.length) { src = c; a = t; found = f; break; } }
+    const faces = [];
     const old = photo.faces || [];
     for (const f of found) {
       if (f.w < MIN_FACE) continue;
       const crop = aligned(src, f), v = await embed(crop);
-      const face = { b: [f.x / src.width, f.y / src.height, f.w / src.width, f.h / src.height].map(n => +n.toFixed(4)), q: +f.score.toFixed(3), v: pack(v) };
+      const p0 = fromTurned(a, f.x, f.y, W, H), p1 = fromTurned(a, f.x + f.w, f.y + f.h, W, H);
+      const face = { b: [Math.min(p0[0], p1[0]) / W, Math.min(p0[1], p1[1]) / H, Math.abs(p1[0] - p0[0]) / W, Math.abs(p1[1] - p0[1]) / H].map(n => +n.toFixed(4)), q: +f.score.toFixed(3), v: pack(v) };
       // a face that was already known here keeps its name
       const was = old.find(o => o.p || o.x ? iou(o.b, face.b) > 0.5 : false);
       if (was) { if (was.p) face.p = was.p; if (was.x) face.x = true; }
-      if (API.hasThumbStore && API.saveThumb) {
-        try {
-          const blob = crop.convertToBlob ? await crop.convertToBlob({ type: 'image/jpeg', quality: 0.82 }) : await new Promise(r => crop.toBlob(r, 'image/jpeg', 0.82));
-          face.t = Cat.uid('fc');
-          await API.saveThumb(face.t, new Uint8Array(await blob.arrayBuffer()));
-        } catch (e) { delete face.t; }
-      }
+      await saveCrop(face, crop);
       faces.push(face);
     }
+    // faces marked by hand stay, unless the detector now finds them itself
+    for (const o of old) if (o.m && !faces.some(f => iou(f.b, o.b) > 0.4)) faces.push(o);
     photo.faces = faces; photo.facesV = VERSION;
     if (!faces.length) delete photo.faces;
     return faces.length;
@@ -191,7 +215,36 @@
       if (i % 20 === 19) Cat.scheduleSave();
     }
     Cat.scheduleSave();
+    Cat.events.emit('people');
     return out;
+  }
+
+  /**
+   * A face the detector missed, marked by hand: box = [x, y, w, h] as fractions of the photo's own frame.
+   * It is described like any other face (eyes, nose and mouth are assumed where they usually sit in a box).
+   */
+  async function addFace(photo, box) {
+    const { base, turns } = await upright(photo), W = base.width, H = base.height, a = turns[0], src = turned(base, a);
+    const c0 = toTurned(a, box[0] * W, box[1] * H, W, H), c1 = toTurned(a, (box[0] + box[2]) * W, (box[1] + box[3]) * H, W, H);
+    const x = Math.min(c0[0], c1[0]), y = Math.min(c0[1], c1[1]), w = Math.abs(c1[0] - c0[0]), h = Math.abs(c1[1] - c0[1]);
+    if (w < 8 || h < 8) throw new Error('That box is too small to be a face');
+    const f = { x, y, w, h, pts: [[0.3, 0.42], [0.7, 0.42], [0.5, 0.62], [0.36, 0.8], [0.64, 0.8]].map(p => [x + p[0] * w, y + p[1] * h]) };
+    const crop = aligned(src, f), v = await embed(crop);
+    const face = { b: box.map(n => +n.toFixed(4)), q: 1, v: pack(v), m: true };
+    await saveCrop(face, crop);
+    (photo.faces || (photo.faces = [])).push(face);
+    changed();
+    return face;
+  }
+  function removeFace(photo, face) {
+    photo.faces = (photo.faces || []).filter(f => f !== face);
+    if (!photo.faces.length) delete photo.faces;
+    changed();
+  }
+  /** The faces of a photo, looking for them first if that has not been done: [{ face, name }], left to right. */
+  async function facesIn(photo) {
+    if (!scanned(photo)) { await scanPhoto(photo); Cat.scheduleSave(); }
+    return (photo.faces || []).filter(f => !f.x).slice().sort((p, q) => p.b[0] - q.b[0]).map(f => ({ face: f, name: f.p && person(f.p) ? person(f.p).name : '' }));
   }
 
   /* ---------------- people ---------------- */
@@ -273,7 +326,7 @@
   function changed() { Cat.scheduleSave(); Cat.events.emit('people'); }
 
   global.PJ.Faces = {
-    scan, scanPhoto, scanned, canScan, groups, people, person, facesOf, photosOf, unnamedCount, name, ignore, unname, rename, remove, namesIn,
+    scan, scanPhoto, scanned, canScan, addFace, removeFace, facesIn, groups, people, person, facesOf, photosOf, unnamedCount, name, ignore, unname, rename, remove, namesIn,
     faceUrl: (face) => face.t && API.thumbUrl ? API.thumbUrl(face.t, 1) : '',
     _test: { detect, aligned, embed, similarity, pack, vec, dot, REC, DET }
   };

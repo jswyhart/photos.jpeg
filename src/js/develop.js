@@ -1006,9 +1006,43 @@
         b.disabled = aiBusy || !photo || photo.kind === 'video';
         return b;
       };
+      // one person among several: chosen by face
+      const personBtn = () => {
+        const b = h('button', {
+          class: 'btn sm', title: 'Mask one person: choose whose face',
+          onclick: async () => {
+            const p = photo;
+            if (!p || aiBusy) return;
+            aiBusy = true; b.disabled = true;
+            const make = async (sel, name) => {
+              UI.activity(PJ.AIMask.KINDS.person.busy, null);
+              try { const fields = await PJ.AIMask.create(p, sel ? 'person' : 'people', sel, name); if (p === photo) viewer.addMask(fields); }
+              catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
+              finally { UI.activity(''); }
+            };
+            try {
+              UI.activity('Looking for faces…', null);
+              const fs = await PJ.Faces.facesIn(p);
+              UI.activity('');
+              if (!fs.length) UI.toast('No faces were found in this photo — People masks everyone the photo shows', 'circle-info');
+              else if (fs.length === 1) await make(null, fs[0].name || 'Person');
+              else {
+                const r = b.getBoundingClientRect();
+                UI.menu(r.left, r.bottom + 4, fs.map((f, i) => ({
+                  label: f.name || `Person ${i + 1} of ${fs.length}, from the left`, icon: 'user',
+                  action: () => make({ face: f.face.b, others: fs.filter(o => o !== f).map(o => o.face.b) }, f.name || `Person ${i + 1}`)
+                })));
+              }
+            } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
+            finally { aiBusy = false; UI.activity(''); if (b.isConnected) b.disabled = false; }
+          }
+        }, icon('user'), 'Person…');
+        b.disabled = aiBusy || !photo || photo.kind === 'video';
+        return b;
+      };
       const list = h('div', { class: 'mask-list' });
       masks.forEach((m, i) => {
-        const ic = m.ai === 'subject' ? 'user-large' : m.ai === 'sky' ? 'cloud-sun' : m.ai === 'people' ? 'people-group' : m.type === 'linear' ? 'grip-lines' : m.type === 'radial' ? 'circle' : 'paintbrush';
+        const ic = m.ai === 'subject' ? 'user-large' : m.ai === 'background' ? 'image' : m.ai === 'person' ? 'user' : m.ai === 'sky' ? 'cloud-sun' : m.ai === 'people' ? 'people-group' : m.type === 'linear' ? 'grip-lines' : m.type === 'radial' ? 'circle' : 'paintbrush';
         const item = h('div', { class: `mask-item${i === st.maskIdx ? ' on' : ''}` },
           h('span', { class: 'mi-ic' }, icon(ic)),
           h('span', { class: 'mi-n' }, m.name + (m.invert ? ' (inv)' : '')),
@@ -1033,6 +1067,7 @@
         h('h4', null, icon('circle-half-stroke'), 'Masking', h('span', { class: 'spacer' }), overlay.el),
         h('div', { class: 'add-row' }, add('linear', 'grip-lines', 'Linear'), add('radial', 'circle', 'Radial'), add('brush', 'paintbrush', 'Brush')),
         PJ.AIMask ? h('div', { class: 'add-row' }, addAi('subject', 'user-large', 'Subject'), addAi('sky', 'cloud-sun', 'Sky'), addAi('people', 'people-group', 'People')) : null,
+        PJ.AIMask ? h('div', { class: 'add-row' }, addAi('background', 'image', 'Background'), PJ.Faces ? personBtn() : null) : null,
         list);
       const m = viewer.activeMask();
       if (!m) {

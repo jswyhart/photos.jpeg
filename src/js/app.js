@@ -228,6 +228,8 @@
     if (Cat.pref('lens.autoProfile', false)) added.forEach(p => { if (p.kind !== 'video') p.autoLens = true; });
     if (Cat.pref('nr.autoIso', false)) added.forEach(p => { if (p.kind !== 'video') p.autoNr = true; });
     library.setLastImport(added.map(p => p.id));
+    // once faces are in use, new photos are looked through as they arrive (in the background)
+    if (PJ.Faces && Cat.pref('faces.auto', false)) PJ.Faces.scan(added).catch(() => { });
     library.setSource('recent');
     refresh();
     setActive(added[0].id);
@@ -1128,7 +1130,8 @@
         h('h4', null, 'Performance'),
         row('GPU previews', gpu.off ? 'Not available on this computer (no hardware WebGL2)' : 'Sliders render on the graphics card while you drag; the final image is always rendered exactly.', chk('gpu.preview', true)),
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
-        row('Wide colour for new RAW photos', 'RAW photos added from now on are edited in Display P3. Each photo can be switched in Develop → Calibration.', chk('raw.wide', true)),
+        row('Wide colour for new photos', 'RAW photos and photos saved in Display P3 (most phones) that are added from now on are edited in Display P3. Each photo can be switched in Develop → Calibration.', chk('raw.wide', true)),
+        row('Look for faces in new photos', 'Photos are looked through for faces as they are imported, on this computer. Turns itself on the first time you use People → Find faces.', chk('faces.auto', false)),
         h('h4', null, 'Import'),
         row('Apply lens profiles on import', 'New photos get the distortion and vignetting correction for their lens from the lens database.', chk('lens.autoProfile', false)),
         row('Apply noise reduction by ISO on import', 'New photos taken at ISO 400 and above start with luminance and colour noise reduction to match.', chk('nr.autoIso', false)),
@@ -1277,6 +1280,13 @@
     lensProfile: lensProfileSelection,
     compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
     mergeHdr: () => mergePhotos('hdr'), mergePano: () => mergePhotos('pano'),
+    toggleFaces: async () => {
+      if (!PJ.Faces) return;
+      const on = viewer.st.showFaces = !viewer.st.showFaces, p = activePhoto();
+      if (on && p && PJ.Faces.canScan(p) && !PJ.Faces.scanned(p)) { UI.activity('Looking for faces…', null); try { await PJ.Faces.scanPhoto(p); Cat.scheduleSave(); } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); } UI.activity(''); }
+      viewer.draw();
+      UI.toast(on ? `Faces shown${p && p.faces ? '' : ' — none found in this photo'} · click one to name it · Alt-drag marks one that was missed` : 'Faces hidden', 'user');
+    },
     toggleStack: () => { const p = activePhoto(); if (p && p.stack) library.toggleStack(p.stack); else UI.toast('This photo isn\'t in a stack', 'circle-info'); },
     print: printDialog,
     reset: () => module === 'develop' ? develop.resetAll() : resetSelection(),
@@ -1369,7 +1379,27 @@
     API.onMenu((cmd) => runCommand(cmd));
     PJ.Exporter.publishPresets();
     // while a photo is on screen in Develop, get the next and previous ones ready
+    // faces on the photo (View → Show Faces): click one to say who it is, Alt-drag to mark one that was missed
+    const askName = async (p, face) => {
+      const F = PJ.Faces, cur = face.p && F.person(face.p) ? F.person(face.p).name : '';
+      const n = await UI.prompt('Who is this?', cur, { placeholder: 'Name' });
+      if (n && n.trim()) { F.name([{ photo: p, face }], n); viewer.draw(); }
+    };
+    viewer.events.on('faceClick', ({ face, x, y }) => {
+      const p = activePhoto(), F = PJ.Faces; if (!p || !F) return;
+      UI.menu(x, y, [
+        { label: face.p && F.person(face.p) ? 'Rename… (' + F.person(face.p).name + ')' : 'Name…', icon: 'user', action: () => askName(p, face) },
+        ...(face.p ? [{ label: 'Not this person', icon: 'user-slash', action: () => { F.unname([{ photo: p, face }]); viewer.draw(); } }] : []),
+        { label: 'Not a face', icon: 'trash-can', action: () => { if (face.m) F.removeFace(p, face); else F.ignore([{ photo: p, face }]); viewer.draw(); } }
+      ]);
+    });
+    viewer.events.on('faceBox', async ({ box }) => {
+      const p = activePhoto(); if (!p || !PJ.Faces) return;
+      try { const face = await PJ.Faces.addFace(p, box); viewer.draw(); await askName(p, face); }
+      catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
+    });
     viewer.events.on('shown', (p) => {
+      if (viewer.st.showFaces && p && PJ.Faces && PJ.Faces.canScan(p) && !PJ.Faces.scanned(p)) PJ.Faces.scanPhoto(p).then(() => { Cat.scheduleSave(); if (activePhoto() === p) viewer.draw(); }).catch(() => { });
       if (module !== 'develop') return;
       const i = visibleList.indexOf(p);
       if (i >= 0) E.prefetch([visibleList[i + 1], visibleList[i - 1]]);

@@ -43,7 +43,7 @@
       // crop
       crop: null,         // {rect, aspect, lock, start:{geo}}
       // spots
-      proof: false,
+      proof: false, showFaces: false, faceBox: null,
       spotSel: -1, spotSize: 0.02, spotMode: 'heal', spotFeather: 50, spotOpacity: 100, spotsVisible: true,
       // masks
       maskIdx: -1, maskCreate: null, maskOverlay: false, brush: { size: 80, feather: 50, flow: 70, erase: false },
@@ -339,6 +339,7 @@
       if (st.tool === 'crop' && st.crop) drawCrop(ctx);
       else if (st.tool === 'spot' && st.spotsVisible) drawSpots(ctx);
       else if (st.tool === 'mask') drawMasks(ctx);
+      if (st.showFaces && st.tool === 'none') drawFaces(ctx);
       if (st.hover && st.hover.brush) {
         const [x, y] = st.hover.brush;
         const r = st.brush.size / 2;
@@ -467,6 +468,36 @@
       g.crop = { ...st.crop.rect };
       g.aspect = st.crop.aspect;
       Cat.commit(st.photo, 'Crop');
+    }
+
+    /* ---- Faces ---- */
+    // a face's box is in fractions of the photo's own frame; its four corners go through the photo's geometry to the screen
+    function faceCorners(b) {
+      const [W, H] = fullDims(), L = Math.max(W, H);
+      return [[b[0], b[1]], [b[0] + b[2], b[1]], [b[0] + b[2], b[1] + b[3]], [b[0], b[1] + b[3]]].map(([fx, fy]) => toScreen(...srcToFo(fx * W / L, fy * H / L)));
+    }
+    function drawFaces(ctx) {
+      const F = PJ.Faces;
+      ctx.save(); ctx.lineJoin = 'round'; ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'top';
+      for (const f of (st.photo.faces || [])) {
+        if (f.x) continue;
+        const c = faceCorners(f.b), who = f.p && F ? F.person(f.p) : null;
+        ctx.strokeStyle = who ? 'rgba(120,200,255,.95)' : 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.5; ctx.setLineDash(who ? [] : [5, 4]);
+        ctx.beginPath(); c.forEach((p, k) => k ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.stroke();
+        const label = who ? who.name : 'Who is this?', lx = Math.min(...c.map(p => p[0])), ly = Math.max(...c.map(p => p[1])) + 4, tw = ctx.measureText(label).width;
+        ctx.setLineDash([]); ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(lx - 1, ly - 1, tw + 10, 18);
+        ctx.fillStyle = '#fff'; ctx.fillText(label, lx + 4, ly + 2);
+      }
+      if (st.faceBox) { const b = st.faceBox; ctx.strokeStyle = '#fff'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); }
+      ctx.restore();
+    }
+    function hitFace(sx, sy) {
+      for (const f of (st.photo.faces || [])) {
+        if (f.x) continue;
+        const c = faceCorners(f.b), xs = c.map(p => p[0]), ys = c.map(p => p[1]);
+        if (sx >= Math.min(...xs) && sx <= Math.max(...xs) && sy >= Math.min(...ys) && sy <= Math.max(...ys) + 22) return f;
+      }
+      return null;
     }
 
     /* ---- Spots ---- */
@@ -742,6 +773,13 @@
       // split divider
       if (st.compare === 'split' && st.tool !== 'crop' && Math.abs(x - (pane.x + pane.w * st.split)) < 14) { drag = { kind: 'split' }; return; }
 
+      // faces: a click on one asks who it is; Alt-drag marks one the detector missed
+      if (st.showFaces && st.tool === 'none') {
+        const f = hitFace(x, y);
+        if (f && !e.altKey) { events.emit('faceClick', { face: f, x: e.clientX, y: e.clientY }); return; }
+        if (e.altKey) { st.faceBox = { x0: x, y0: y, x1: x, y1: y }; drag = { kind: 'faceBox' }; return; }
+      }
+
       if (st.tool === 'crop' && st.crop) {
         const r = cropScreenRect();
         const hs = handlesOf(r);
@@ -889,6 +927,7 @@
         events.emit('geo');
         return;
       }
+      if (drag.kind === 'faceBox') { st.faceBox.x1 = x; st.faceBox.y1 = y; drawOverlay(); return; }
       if (drag.kind === 'fillStroke') {
         const [u, v] = foToSrc(...toFo(x, y, pane));
         if (u < 0 || v < 0 || st.fillStroke.pts.length >= 300) return;
@@ -993,6 +1032,15 @@
         update('commit'); events.emit('geo');
       } else if (d.kind === 'cropMove' || d.kind === 'cropHandle') {
         events.emit('geo');
+      } else if (d.kind === 'faceBox') {
+        const b = st.faceBox; st.faceBox = null; drawOverlay();
+        if (b && Math.abs(b.x1 - b.x0) > 12 && Math.abs(b.y1 - b.y0) > 12) {
+          // the drawn rectangle, taken back to the photo's own frame
+          const [W, H] = fullDims(), L = Math.max(W, H), pane = mainPane();
+          const pts = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([sx, sy]) => { const [u, v] = foToSrc(...toFo(sx, sy, pane)); return [u * L / W, v * L / H]; });
+          const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), x0 = Math.max(0, Math.min(...xs)), y0 = Math.max(0, Math.min(...ys)), x1 = Math.min(1, Math.max(...xs)), y1 = Math.min(1, Math.max(...ys));
+          if (x1 > x0 && y1 > y0) events.emit('faceBox', { box: [x0, y0, x1 - x0, y1 - y0] });
+        }
       } else if (d.kind === 'fillStroke') {
         const stroke = st.fillStroke, photo = st.photo;
         const sp = { id: Cat.uid('sp_'), mode: 'fill', x: stroke.pts[0][0], y: stroke.pts[0][1], sx: stroke.pts[0][0], sy: stroke.pts[0][1], r: stroke.r, pts: stroke.pts, feather: st.spotFeather, opacity: st.spotOpacity };

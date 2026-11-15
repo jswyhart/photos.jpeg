@@ -441,6 +441,7 @@ public sealed class MainForm : Form
                 Cmd("Map", "map"),
                 Sep(),
                 Cmd("Compare Selected Photos", "compare"),
+                Cmd("Show Faces", "toggleFaces"),
                 Cmd("Before / After", "beforeAfter", "Y"),
                 Cmd("Show Clipping", "clipping", "J"),
                 Cmd("Zoom to Fit", "zoomFit", "Ctrl+0"),

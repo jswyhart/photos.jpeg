@@ -26,7 +26,11 @@
   const KINDS = {
     subject: { model: 'subject', name: 'Subject', busy: 'Finding the subject…' },
     sky: { model: 'scene', classes: [2], name: 'Sky', busy: 'Finding the sky…' },
-    people: { model: 'scene', classes: [12], name: 'People', busy: 'Finding people…' }
+    people: { model: 'scene', classes: [12], name: 'People', busy: 'Finding people…' },
+    // everything but the subject
+    background: { model: 'subject', invert: true, name: 'Background', busy: 'Finding the background…' },
+    // one person among several: the people in the photo, divided by whose face each part is nearest to
+    person: { model: 'scene', classes: [12], name: 'Person', busy: 'Finding that person…' }
   };
 
   /* ---------------- the runtime: in a thread of its own (aiworker.js) ---------------- */
@@ -180,14 +184,31 @@
   }
 
   /** Work the mask out for a photo: { w, h, data (Uint8Array), found }. */
-  async function compute(photo, kind) {
+  async function compute(photo, kind, sel) {
     // the photo as developed, before any edits or geometry: masks live in the source image's own frame
     const img = await PJ.Engine.render(photo, P.defaultSettings(), 'draft', {}, 0);
     if (!img) throw new Error('The photo could not be rendered');
     const prob = await probability(kind, img);
     const L = Math.max(img.width, img.height), gw = Math.max(1, Math.ceil(G * img.width / L)), gh = Math.max(1, Math.ceil(G * img.height / L));
     const up = resample(prob.data, prob.w, prob.h, gw, gh);
-    if (kind === 'subject') {
+    if (kind === 'person' && sel && sel.face && sel.others && sel.others.length) {
+      // Each part of "people" goes to the person whose face (and the body below it) it is nearest to.
+      const reach = (b, x, y) => {
+        const cx = (b[0] + b[2] / 2) * gw, cy = (b[1] + b[3] / 2) * gh, fw = Math.max(1, b[2] * gw), len = 3.5 * b[3] * gh;
+        const t = Math.max(0, Math.min(1, (y - cy) / len)), dx = x - cx, dy = y - (cy + t * len);
+        return Math.hypot(dx, dy) / fw;
+      };
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        const i = y * gw + x; if (up[i] < 0.02) continue;
+        const mine = reach(sel.face, x, y); let other = Infinity;
+        for (const o of sel.others) other = Math.min(other, reach(o, x, y));
+        const t = Math.max(0, Math.min(1, (other / Math.max(1e-3, mine) - 0.85) / 0.3));
+        up[i] *= t * t * (3 - 2 * t);
+      }
+      let left = 0; for (let i = 0; i < up.length; i++) if (up[i] > 0.5) left++;
+      prob.found = left > up.length * 0.002;
+    }
+    if (kind === 'subject' || kind === 'background') {
       // The saliency network goes for what stands out — in a dim portrait that can be the face alone.
       // When the people it found overlap what stands out, the whole person is the subject.
       try {
@@ -209,7 +230,8 @@
     for (let i = 0; i < guide.length; i++) guide[i] = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255;
     const fine = refine(up, guide, gw, gh, 6, 2e-3);
     const data = new Uint8Array(gw * gh);
-    for (let i = 0; i < data.length; i++) { const t = Math.max(0, Math.min(1, (fine[i] - 0.15) / 0.7)); data[i] = Math.round(t * t * (3 - 2 * t) * 255); }
+    const flip = !!KINDS[kind].invert;
+    for (let i = 0; i < data.length; i++) { const t = Math.max(0, Math.min(1, (fine[i] - 0.15) / 0.7)), v = Math.round(t * t * (3 - 2 * t) * 255); data[i] = flip ? 255 - v : v; }
     return { w: gw, h: gh, data, found: prob.found };
   }
 
@@ -253,7 +275,7 @@
         pending.set(id, (async () => {
           let map = await load(id);
           if (!map && m.ai && KINDS[m.ai] && photo) {
-            try { map = await compute(photo, m.ai); await store(id, map); }
+            try { map = await compute(photo, m.ai, m.sel); await store(id, map); }
             catch (e) { console.warn(`the ${m.ai} mask could not be rebuilt:`, e && e.message); }
           }
           // nothing to be had: an empty map, so the photo still renders (the mask then does nothing)
@@ -268,15 +290,15 @@
    * Make a Subject / Sky / People mask for a photo. Resolves to the fields a brush mask needs
    * ({ ai, map: { id, w, h }, name }); rejects when the photo has nothing of that kind.
    */
-  async function create(photo, kind) {
+  async function create(photo, kind, sel, name) {
     if (!KINDS[kind]) throw new Error('Unknown mask ' + kind);
     if (photo.kind === 'video') throw new Error('These masks are for photos; on a clip the subject moves');
-    const map = await compute(photo, kind);
-    if (!map.found) throw new Error({ subject: 'No clear subject was found in this photo', sky: 'No sky was found in this photo', people: 'No people were found in this photo' }[kind]);
+    const map = await compute(photo, kind, sel);
+    if (!map.found) throw new Error({ subject: 'No clear subject was found in this photo', background: 'No clear subject was found, so there is no background to tell from it', sky: 'No sky was found in this photo', people: 'No people were found in this photo', person: 'That person could not be told apart from the rest of the photo' }[kind]);
     const id = PJ.Catalog.uid('mm');
     remember(id, map);
     await store(id, map);
-    return { ai: kind, map: { id, w: map.w, h: map.h, of: photo.id }, name: KINDS[kind].name };
+    return Object.assign({ ai: kind, map: { id, w: map.w, h: map.h, of: photo.id }, name: name || KINDS[kind].name }, sel ? { sel } : {});
   }
 
   /**
@@ -291,6 +313,7 @@
     for (const m of ms) {
       if (!m.ai || !KINDS[m.ai] || !m.map || m.map.of === photo.id) continue;
       let map = null;
+      delete m.sel;                      // a chosen person is not known in another photo: all its people stand in
       try { map = await compute(photo, m.ai); }
       catch (e) { console.warn(`the ${m.ai} mask could not be made for ${photo.name}:`, e && e.message); }
       const id = PJ.Catalog.uid('mm');

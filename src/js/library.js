@@ -152,6 +152,7 @@
       const list = (app.visiblePhotos ? app.visiblePhotos() : sourceList()).filter(p => F.canScan(p) && !F.scanned(p));
       if (!list.length) { if (F.unnamedCount()) nameFaces(); else UI.toast('Every photo shown has been looked through already', 'circle-info'); return; }
       faceScan = { stop: false };
+      if (Cat.pref('faces.auto', null) === null) Cat.setPref('faces.auto', true);        // from now on, photos are looked through as they are imported (Preferences turns it off)
       let r;
       try { r = await F.scan(list, (i, n, p) => UI.activity(`Looking for faces · ${i + 1} of ${n} · ${p.name} (click the magnifier again to stop)`, i / n), faceScan); }
       finally { faceScan = null; UI.activity('', 0); }
