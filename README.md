@@ -212,7 +212,7 @@ RAW files are developed into Display P3 primaries, which reach past sRGB in the 
 
 Photos saved in Display P3 — JPEG and HEIC files from most phones — are read in P3 as well instead of being narrowed on the way in, and take the same mark.
 
-**Soft proof** (below the mark) changes only what you see. *sRGB* shows a wide-colour photo as an sRGB file or screen will, with the colours sRGB cannot hold in magenta; *Adobe RGB* leaves the picture as it is and marks what an Adobe RGB export cannot hold. (Printer profiles are not supported.)
+**Soft proof** (below the mark) changes only what you see. *sRGB* shows a wide-colour photo as an sRGB file or screen will, with the colours sRGB cannot hold in magenta; *Adobe RGB* leaves the picture as it is and marks what an Adobe RGB export cannot hold. **A printer profile** can be loaded there too (*Load a printer profile…*, an `.icc` or `.icm` file from the printer or paper maker): the colours that printer and paper cannot hold are marked, on any photo. Profiles of the usual kind are read (ICC version 2, Lab-based tables); version 4 table profiles are refused with a message. The proof marks what is out of reach; it does not imitate the paper's white or the print's contrast.
 
 Photos that are not marked — every photo that was in a catalog before this existed — are brought to sRGB first and render as they always did. Turning the mark on or off is not an edit: presets, paste and reset leave it alone. Limits: the working space is P3, so an Adobe RGB export holds what P3 and Adobe RGB share; JPEG, PNG and other non-RAW sources are sRGB as before; `.cube` looks are applied in sRGB and brought back.
 
@@ -240,6 +240,22 @@ Select the photos, then Photo → **Merge to HDR…** or **Merge to Panorama…*
 
 Develop → Lens → **Fisheye** turns the curved lines of a fisheye lens (action cameras) into straight ones. The slider says how wide the lens is; raise it until straight things look straight. The centre keeps its size and the edges are stretched outward, so the frame shows a little less than before — widen it again with Transform → Scale if you like. Photos corrected this way also join into panoramas.
 
+## Renaming and moving files
+
+Photo → **Rename or Move…** (also in the right-click menu) renames the selected files on disk by a pattern — `{name}`, `{date}`, `{time}`, `{seq}`, `{model}` — and can move them to another folder. Their `.xmp` sidecars go with them and the catalog follows, so edits, ratings and virtual copies stay attached. Nothing is ever overwritten: a file whose new name is taken is left as it is and listed. (Windows app.)
+
+## Watched folder
+
+Preferences → **Watched folder**: photos and clips that appear in that folder, or in folders inside it, are added to the catalog by themselves once they have finished being written — for a card reader that copies into a folder, a phone sync, or a tethering program. They join the catalog quietly, without taking you away from what you are doing. (Windows app.)
+
+## Catalog backups
+
+The catalog is copied once a day (the newest 14 are kept). Help → **Catalog Backups…** lists the copies, makes one on the spot, and restores one: the catalog as it is at that moment is kept as a further backup first, so a restore can be undone. Photo files are not part of a backup and are never changed by a restore. (Windows app.)
+
+## Printing
+
+File → Print: a contact sheet (2 to 8 across) or one photo per page, with the paper size, orientation and margins set in the dialog, a heading, file names and dates. One photo per page either shows the whole photo or fills the page.
+
 ## Closing while exports run
 
 If the window is closed while the export queue is still working, the app asks first; **Close anyway** stops the queue (files already written stay), Cancel keeps the app open.
@@ -248,9 +264,13 @@ If the window is closed while the export queue is still working, the app asks fi
 
 The neural-network models behind the masks and face grouping are part of the normal build (`src/vendor/ml`, about 63 MB). `windows\build.ps1 -Lite` leaves them out: the app then asks before downloading each one the first time a feature needs it, from this repository on GitHub, checks it against a size and SHA-256 built into the app (`windows/Models.cs`), and keeps it in the data folder. Nothing else is downloaded that way, and no photo leaves the computer.
 
+The Android app takes the same switch (`gradle assembleDebug -Plite`) and the Mac build `LITE=1 ./build.sh`.
+
+Pushing a version tag (`v2.1.0`) runs `.github/workflows/release.yml`: it builds the Windows installers, the Store package and the Android app and publishes them as a GitHub release, with that version's section of `CHANGELOG.md` as the notes.
+
 `windows\package-store.ps1` packs the app as an MSIX for the Microsoft Store with the identity reserved in Partner Center (`windows/store/AppxManifest.xml`). The package is left unsigned — the Store signs what is uploaded — so it cannot be installed by double-click; test with the ordinary build. A Store install keeps its own copy of the data folder once it writes to it (Windows redirects a packaged app's writes under AppData).
 
-DNG files whose picture is stored as JPEG XL (Galaxy S23 and later) can be developed from that data: Preferences → *Develop JPEG XL DNG files (experimental)*. It takes about half a minute per photo (a 50-megapixel picture is decoded in full), and the result is somewhat flatter than the camera's JPEG, which is tone-mapped area by area; so it is off unless you turn it on, and such files otherwise open from their embedded preview.
+DNG files whose picture is stored as JPEG XL (Galaxy S23 and later) can be developed from that data: Preferences → *Develop JPEG XL DNG files (experimental)*. It takes about half a minute per photo (a 50-megapixel picture is decoded in full), and the result looks like the preview stored inside the DNG, which is flatter than the JPEG the phone saves next to it (that one gets the phone's own extra processing); so it is off unless you turn it on, and such files otherwise open from their embedded preview.
 
 ## Catalog clean-up
 

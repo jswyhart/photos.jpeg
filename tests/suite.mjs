@@ -541,6 +541,42 @@ test('HDR merge can keep the full range: linear data with headroom and a preview
   return `highlights at ${hi.toFixed(1)}× and ${lo.toFixed(1)}× the middle frame's white are kept (headroom ${r.headroom.toFixed(1)}×)`;
 });
 
+test('files are renamed with the catalog following; catalog backups are made and listed', async () => {
+  const r = await page(async () => {
+    const A = PJ.API, Cat = PJ.Catalog;
+    if (!A.moveFile) return { skipped: true };
+    const p = Cat.state.photos.find(x => x.name === 'gradient.jpg'), other = Cat.state.photos.find(x => x.name === 'building.jpg'), from = p.path;
+    const m = await A.moveFile(from, '', 'gradient-renamed.jpg');
+    const there = await A.stat(m.path), gone = await A.stat(from).catch(() => null);
+    let refused = '', badExt = '';
+    try { await A.moveFile(m.path, '', other.name); } catch (e) { refused = e.message; }
+    try { await A.moveFile(m.path, '', 'gradient.png'); } catch (e) { badExt = e.message; }
+    const back = await A.moveFile(m.path, '', 'gradient.jpg');              // as it was, for the tests that follow
+    const n0 = (await A.listBackups()).length; await Cat.save(); const b = await A.backupNow(); const list = await A.listBackups();
+    return { moved: m.moved, name: m.name, there: !!there, gone: !gone || !(gone.size > 0), refused, badExt, back: back.path === from, n0, n1: list.length, made: b.name, newest: list[0].name };
+  });
+  if (r.skipped) return 'skipped';
+  assert(r.moved && r.name === 'gradient-renamed.jpg' && r.there && r.gone && r.back, JSON.stringify(r));
+  assert(/already exists/.test(r.refused) && /extension/.test(r.badExt), 'a rename onto an existing file or to another extension must be refused: ' + r.refused + ' / ' + r.badExt);
+  assert(r.n1 === r.n0 + 1 && r.newest === r.made && /^catalog-manual-/.test(r.made), JSON.stringify(r));
+});
+
+test('printer soft proof: working colours reach Lab correctly; a file that is not a profile is refused', async () => {
+  const r = await page(() => {
+    const T = PJ.Proof._test, w = T.toLab('srgb', 1, 1, 1), k = T.toLab('srgb', 0, 0, 0), red = T.toLab('srgb', 1, 0, 0), p3red = T.toLab('p3', 1, 0, 0);
+    let refused = '';
+    try { PJ.Proof.parse(new Uint8Array(400)); } catch (e) { refused = e.message; }
+    // the cube in a render: a made-up printer that cannot hold strong reds
+    const n = 5, cube = new Float32Array(n * n * n); for (let b = 0; b < n; b++) for (let g = 0; g < n; g++) for (let rr = 0; rr < n; rr++) cube[(b * n + g) * n + rr] = rr >= 3 && g <= 1 && b <= 1 ? 1 : 0;
+    const src = new Uint8ClampedArray(8); src.set([250, 20, 20, 255], 0); src.set([120, 130, 110, 255], 4);
+    const res = PJ.Pipeline.render({ src: { data: src, width: 2, height: 1 }, settings: PJ.Pipeline.defaultSettings(), fullLongEdge: 2, seed: 1, opts: { gamutCube: { n, srgb: cube, p3: cube } } });
+    return { w: w.map(v => +v.toFixed(1)), k: k.map(v => +v.toFixed(1)), red: red.map(v => Math.round(v)), p3redChroma: Math.round(Math.hypot(p3red[1], p3red[2])), redChroma: Math.round(Math.hypot(red[1], red[2])), refused, px: Array.from(res.data.slice(0, 3)).join() + ' | ' + Array.from(res.data.slice(4, 7)).join(), out: res.clip.out };
+  });
+  assert(Math.abs(r.w[0] - 100) < 0.2 && Math.abs(r.w[1]) < 0.3 && Math.abs(r.w[2]) < 0.3 && r.k[0] === 0, 'white and black: ' + JSON.stringify(r));
+  assert(Math.abs(r.red[0] - 54) <= 1 && Math.abs(r.red[1] - 81) <= 2 && Math.abs(r.red[2] - 70) <= 2 && r.p3redChroma > r.redChroma, 'red: ' + JSON.stringify(r));
+  assert(/not a colour profile/.test(r.refused) && r.px === '255,0,255 | 120,130,110' && r.out === 1, JSON.stringify(r));
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

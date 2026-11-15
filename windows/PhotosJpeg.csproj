@@ -14,7 +14,7 @@
     <Product>photos.jpeg</Product>
     <Company>photos.jpeg</Company>
     <Description>RAW photo &amp; video editor</Description>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <!-- Address of the update manifest (see Updater.cs). Empty: the app never checks for updates. -->
     <UpdateUrl></UpdateUrl>
     <ApplicationIcon>icon.ico</ApplicationIcon>
