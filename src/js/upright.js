@@ -44,10 +44,11 @@
         }
       }
     }
-    // peaks: lines supported along at least a quarter of the height
-    const lines = [], need = h * 0.25;
+    // peaks: straight edges at least about a twelfth of the picture's height long (real buildings
+    // rarely offer one unbroken edge longer than that: windows, signs and wires interrupt them)
+    const lines = [], need = Math.max(28, h * 0.085);
     const taken = new Uint8Array(w * NS);
-    for (let n = 0; n < 40; n++) {
+    for (let n = 0; n < 80; n++) {
       let best = 0, bi = -1;
       for (let i = 0; i < acc.length; i++) if (!taken[i] && acc[i] > best) { best = acc[i]; bi = i; }
       if (bi < 0 || best < need) break;
@@ -79,6 +80,9 @@
       if (kept.length === use.length) break;
       use = kept;
     }
+    // how much of what was found agrees: buildings give lines that fit one vanishing point,
+    // trees and clutter give tilts all over the place
+    if (fit) fit.agree = fit.n / lines.length;
     return fit;
   }
 
@@ -116,7 +120,8 @@
     if (!res) throw new Error('The photo could not be rendered');
     const found = findVerticals(res);
     const fit = fitConvergence(found.lines, found.w);
-    if (!fit || fit.n < 4 || fit.spread < 0.3) throw new Error('Not enough straight vertical lines across the photo to work out the perspective');
+    if (!fit || fit.n < 6 || fit.spread < 0.3) throw new Error('Not enough straight vertical lines across the photo to work out the perspective');
+    if (fit.agree < 0.55 || fit.rms > 0.02) throw new Error('The vertical lines in this photo do not agree on one perspective (trees, curved or cluttered edges), so nothing was changed');
     const half = Math.max(found.w, found.h) / 2;
     // tilt grows by a per pixel of position: the lines meet 1/a from the centre. The pipeline's Vertical
     // spreads the picture by (1 + kv·y / half) across, which adds −kv / half to that growth: cancel it.
