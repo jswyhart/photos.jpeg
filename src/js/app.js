@@ -711,6 +711,69 @@
     return { close, panes, zoom: zs, place };
   }
 
+  /* ---------------- merging photos: HDR and panorama ---------------- */
+  let mergeWorker = null, mergeBusy = false;
+  /**
+   * Merge the selected photos into one new picture (js/mergeworker.js): 'hdr' fuses different exposures
+   * of one scene, 'pano' joins overlapping photos. Each photo goes in as it is developed now; the result
+   * is written as a 16-bit TIFF next to the first photo and added to the catalog. opts.dir overrides the folder.
+   */
+  async function mergePhotos(kind, list, opts) {
+    const what = kind === 'hdr' ? 'HDR' : 'Panorama';
+    const photos = (list || selectedPhotos()).filter(p => p.kind !== 'video' && !p.missing)
+      .sort((a, b) => String(a.captureTime || '').localeCompare(String(b.captureTime || '')) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (photos.length < 2) { UI.toast(kind === 'hdr' ? 'Select two or more exposures of the same scene first' : 'Select two or more overlapping photos first', 'circle-info'); return null; }
+    if (photos.length > 12) { UI.toast('That is more than 12 photos — merge them in smaller groups', 'circle-info'); return null; }
+    if (mergeBusy) { UI.toast('A merge is already running', 'circle-info'); return null; }
+    mergeBusy = true;
+    try {
+      if (!mergeWorker) mergeWorker = new Worker(new URL('js/mergeworker.js', location.href).href);
+      const wk = mergeWorker;
+      wk.postMessage({ op: 'reset' });
+      const focal = [];
+      // a panorama of many large photos would not fit in memory at full size: they go in smaller
+      const edge = kind === 'pano' ? Math.max(1600, Math.round(Math.sqrt(120e6 / photos.length) * 1.2)) : Infinity;
+      for (let i = 0; i < photos.length; i++) {
+        const p = photos[i];
+        UI.activity(`${what}: developing ${p.name} (${i + 1} of ${photos.length})`, 0.4 * i / photos.length);
+        let res = await E.renderFull(p, P.clone(p.settings));
+        if (!res) throw new Error(p.name + ' could not be developed');
+        let w = res.width, h = res.height, d = res.data;
+        if (Math.max(w, h) > edge) { const sm = PJ.Decode.resizePixels({ data: d, width: w, height: h }, edge); w = sm.width; h = sm.height; d = sm.data; }
+        const rgb = new Uint8Array(w * h * 3);
+        for (let q = 0, o = 0; q < w * h * 4; q += 4, o += 3) { rgb[o] = d[q]; rgb[o + 1] = d[q + 1]; rgb[o + 2] = d[q + 2]; }
+        res = null; d = null;
+        // focal length in pixels, from the 35 mm equivalent (a full-frame sensor is 36 mm on its long side)
+        const f35 = +(p.exif && p.exif.focalLength35) || 0;
+        focal.push(f35 > 0 ? f35 / 36 * Math.max(w, h) : 0);
+        wk.postMessage({ op: 'image', w, h, rgb }, [rgb.buffer]);
+        if (E.dropFull) E.dropFull();
+      }
+      const out = await new Promise((resolve, reject) => {
+        wk.onmessage = (ev) => { const m = ev.data; if (m.progress != null) UI.activity(`${what}: ${m.text}`, 0.4 + 0.5 * m.progress); else if (m.error) reject(new Error(m.error)); else resolve(m); };
+        wk.onerror = (ev) => { mergeWorker = null; reject(new Error('The merge stopped: ' + (ev && ev.message || 'not enough memory?'))); };
+        wk.postMessage({ op: kind, id: 1, focal, maxPixels: 40e6 });
+      });
+      UI.activity(`${what}: writing the file`, 0.93);
+      const bytes = PJ.Exporter.encodeTiffRich({ width: out.w, height: out.h, data16: out.rgb16 }, PJ.ICC ? PJ.ICC.profile('srgb') : null);
+      const first = photos[0], base = first.name.replace(/\.[^.]+$/, '');
+      const dir = (opts && opts.dir) || API.dirname(first.path);
+      const written = await API.writeFile(API.joinPath(dir, `${base}-${kind === 'hdr' ? 'HDR' : 'Pano'}.tif`), bytes, 'unique');
+      const path = (written && written.path) || written;
+      UI.activity('');
+      let added = [];
+      if (typeof path === 'string') {
+        const r = await API.scanPaths([path]);
+        added = await importDescs(Array.isArray(r) ? r : (r && r.files) || []);
+      }
+      UI.toast(`${what} of ${photos.length} photos: ${out.w} × ${out.h}`, 'layer-group');
+      return { path, width: out.w, height: out.h, stats: out.stats, photo: added[0] || null };
+    } catch (e) {
+      UI.toast(`${what}: ${e && e.message || e}`, 'triangle-exclamation');
+      return { error: String(e && e.message || e) };
+    } finally { mergeBusy = false; UI.activity(''); }
+  }
+
   /* ---------------- catalog clean-up ---------------- */
   /** Everything in the thumbnail store that the catalog still refers to: previews, LUTs, mask shapes (also those only an undo step or a snapshot names). */
   function storeKeys() {
@@ -1213,6 +1276,7 @@
     autoTone: () => module === 'develop' ? develop.autoTone() : autoToneSelection(),
     lensProfile: lensProfileSelection,
     compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
+    mergeHdr: () => mergePhotos('hdr'), mergePano: () => mergePhotos('pano'),
     toggleStack: () => { const p = activePhoto(); if (p && p.stack) library.toggleStack(p.stack); else UI.toast('This photo isn\'t in a stack', 'circle-info'); },
     print: printDialog,
     reset: () => module === 'develop' ? develop.resetAll() : resetSelection(),
@@ -1252,7 +1316,7 @@
     openDevelop, photoMenu, selectIds, setRating, setFlag, setLabel, rotate, flip, removePhotos, copySettings, pasteSettings, syncSettings,
     refreshPhotos, refreshView, autoGradeSelection, gradeLookMenu, xmpRead, xmpWrite, preferences,
     applyPresetToSelection, autoToneSelection, resetSelection, slideshow, setModule, runCommand, back, toggleDrawer,
-    compareView, printSheet, storeKeys, cleanCatalog, exportSelected: () => PJ.Exporter.openDialog(targets())
+    compareView, printSheet, storeKeys, cleanCatalog, mergePhotos, exportSelected: () => PJ.Exporter.openDialog(targets())
   });
 
   async function boot() {

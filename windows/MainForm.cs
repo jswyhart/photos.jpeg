@@ -429,6 +429,8 @@ public sealed class MainForm : Form
                 Cmd("Map", "map"),
                 Sep(),
                 Cmd("Compare Selected Photos", "compare"),
+                Cmd("Merge to HDR…", "mergeHdr"),
+                Cmd("Merge to Panorama…", "mergePano"),
                 Cmd("Before / After", "beforeAfter", "Y"),
                 Cmd("Show Clipping", "clipping", "J"),
                 Cmd("Zoom to Fit", "zoomFit", "Ctrl+0"),
