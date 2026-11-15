@@ -1,5 +1,9 @@
 # Changes
 
+## Unreleased
+
+- The installers and Store package built by the release workflow include ffmpeg (6.1.1, GPL essentials build), as locally built ones already did; the 2.1.0 release files do not
+
 ## 2.1.0
 
 **New**

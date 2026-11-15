@@ -23,6 +23,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: ffmpeg to bundle (one fixed version, checked against its checksum)
+        shell: pwsh
+        run: ./windows/get-ffmpeg.ps1
       - name: Installer
         shell: pwsh
         run: ./windows/build.ps1 -Installer
