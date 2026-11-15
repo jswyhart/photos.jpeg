@@ -32,6 +32,8 @@ While developing, `dotnet run` in `windows/` starts the app; set `PJ_WEB_ROOT` t
 - **Open with:** `photos.jpeg.exe --register` adds photos.jpeg to Explorer's "Open with" list for your user account (no admin rights, and it doesn't change your default apps); `--unregister` removes it. Opening a file while the app is running hands it to the running window.
 - **System decoders:** formats the editor can't open itself (HEIC without the HEVC extension, JPEG XL, extra camera RAW formats…) fall back to the Windows Imaging Component, which uses whatever codecs are installed (HEIF Image Extensions, Raw Image Extension, JPEG XL Image Extension).
 - **ffmpeg** (for optimized media, see Video below) is bundled when `ffmpeg.exe` is in `windows\tools` at build time, together with its licence texts (`ffmpeg-LICENSE.txt`, `ffmpeg-README.txt`); the copy there now is the GPL "essentials" build from gyan.dev. Without it the app uses an ffmpeg on the PATH (`winget install ffmpeg`).
+- **Camera cards:** when a card or camera with a DCIM folder is connected, the app offers to copy its photos in with Import and Organize (Preferences turns the prompt off).
+- **Log:** Help → Show Log opens `logsphotos.jpeg.log` in the data folder: start-up details, errors from the app and the editor, crashes of the web view. Nothing in it is sent anywhere.
 - **Controlled folder access:** if Windows' ransomware protection is on, it blocks apps it doesn't know from writing to Pictures, Documents, Videos and the Desktop. The default export folder is therefore `%USERPROFILE%\photos.jpeg Exports` on such PCs (and `Pictures\photos.jpeg Exports` otherwise). Exporting into a protected folder works once you allow photos.jpeg (Windows Security → Virus & threat protection → Ransomware protection → Allow an app through Controlled folder access); until then the app explains the block instead of failing silently.
 - **Import and Organize** (File menu): copies or moves new photos into a folder you choose — in subfolders by capture date (`2026 / 2026-10-31` and similar) and renamed from a pattern (date + number, date + original name, or your own text + number) — then adds them to the catalog. XMP sidecars travel with their photos; existing files are never overwritten.
 - **Export with Preset** (File menu): one-click exports with the built-in presets (JPEG full size, JPEG 2048 px for the web, JPEG 4K, TIFF, PNG) and the ones you save in the Export dialog, to the folder you used last.
@@ -133,8 +135,15 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 - Destination folder or "same folder as original", optional subfolder
 - Naming templates: `{name} {seq} {date} {title} {rating} {custom}`; overwrite / unique name / skip
 - Resize by long edge, short edge, width × height, megapixels or percentage; don't enlarge
+- Formats: JPEG, PNG, WebP, TIFF (8-bit, or 16-bit for full-size exports), and AVIF in the Windows app (encoded by the bundled ffmpeg). JPEG, PNG and TIFF carry a colour profile: sRGB, or Display P3 / Adobe RGB (1998) with the pixels converted. Everything the editor produces lies inside sRGB, so the wider spaces hold the same colours in a larger container — for labs and workflows that ask for them.
 - Output sharpening for screen, text watermark, camera metadata in JPEG exports: the original EXIF block for JPEG sources, and EXIF written from the catalog (camera, lens, exposure, ISO, focal length, capture time, author, GPS) for RAW, TIFF and PNG sources
-- **Lens profiles** (Develop → Lens Corrections → *Lens profile*, or Photo → Apply Lens Profile for a whole selection): the photo's camera and lens are looked up in the bundled [lensfun](https://lensfun.github.io) database (about 1,500 lenses) and the calibrated distortion and vignetting for the focal length and aperture used are corrected. The image is scaled just enough to leave no empty border. *Off* removes it. Chromatic aberration and fisheye lenses are not handled; vignetting assumes a distant subject.
+- **Lens profiles** (Develop → Lens Corrections → *Lens profile*, or Photo → Apply Lens Profile for a whole selection): the photo's camera and lens are looked up in the bundled [lensfun](https://lensfun.github.io) database (about 1,500 lenses) and the calibrated distortion, colour fringing (lateral chromatic aberration) and vignetting for the focal length and aperture used are corrected. The image is scaled just enough to leave no empty border. *Off* removes it. Preferences → *Apply lens profiles on import* does it for every new photo. Fisheye lenses are not handled; vignetting assumes a distant subject.
+- **Auto upright** (Develop → Transform): finds the vertical lines in the photo and sets Vertical, Rotate and Scale so buildings stand straight. It needs several long, straight vertical edges spread across the frame and says so when there aren't enough.
+- **Noise reduction for the ISO** (Develop → Detail → *Auto for ISO*, or Preferences → *Apply noise reduction by ISO on import*): sets luminance and colour noise reduction from the ISO the photo was taken at.
+- **Healing strokes**: with the spot tool, drag instead of clicking to heal or clone along a line (wires, scratches); the stroke moves and deletes as one piece.
+- **Compare** (View → Compare Selected Photos): two to six photos side by side; rate, pick and reject from the keyboard.
+- **Stacks** (Photo → Stacking): group photos under one thumbnail, or let *Auto-Stack* group bursts (shots within two seconds) and RAW + JPEG pairs. The badge on the thumbnail opens and closes a stack.
+- **Print** (File → Print, Ctrl+P): a contact sheet of the selection (2–8 across, with names and dates) or one photo per page, through the system print dialog — which also saves PDFs.
 - **Match camera** (same panel), for lenses the database doesn't have: measures the distortion by comparing the developed RAW with the camera's own corrected preview inside the file, and remembers it for that lens and focal length. It can only learn what the camera itself corrects.
 - Saved export presets and "Export with previous"
 
@@ -255,9 +264,11 @@ windows/           Native Windows app (C#: WinForms + WebView2 + Windows Imaging
   ResourceServer.cs  Serves the editor and media to the web view in-process (no network port)
   Storage.cs         Catalog, thumbnails, folder scanning, sidecars
   VideoTool.cs       Optimized media (ffmpeg, Blackmagic RAW helper, vendor converters)
+  Log.cs             The app's log file (Help → Show Log)
   Updater.cs         Update check against a hosted manifest (off unless <UpdateUrl> is set)
   installer/         The Setup / Uninstall program (.NET Framework 4.8, part of Windows)
   SystemImage.cs     Windows Imaging Component fallback decoder
+tests/             Automated tests for the Windows app: testsun.ps1 (see its header; uses a scratch catalog)
 src/index.html     UI shell
 src/css/app.css    Styles
 src/js/pipeline.js Image-processing engine (geometry, tone, color, detail, effects, masks, spots)
@@ -266,6 +277,8 @@ src/js/engine.js   Source cache, worker pool, thumbnails, auto tone/WB
 src/js/decode.js   Image decoding, embedded RAW previews, EXIF parser
 src/js/rawdec.js   RAW decoders (NEF, CR2, ARW, DNG/LJ92), demosaic, camera colour (runs in workers)
 src/js/rawgpu.js   The same development as WebGL 2 shaders (runs in a worker on an OffscreenCanvas)
+src/js/upright.js  Auto upright (vertical line detection → Transform settings)
+src/js/icc.js      Colour profiles for exports (sRGB, Display P3, Adobe RGB)
 src/js/lens.js     Lens profiles: lensfun database lookup, and distortion measured against the camera's own preview
 src/vendor/lensfun/  lensfun.json — lens calibration data (CC BY-SA 3.0, see LICENSE.txt there)
 tools/lensfun/build-db.js  Rebuilds lensfun.json from a lensfun checkout
