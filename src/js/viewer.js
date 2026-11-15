@@ -470,7 +470,22 @@
     function drawSpots(ctx) {
       const spots = st.photo.settings.spots || [];
       const L = longEdge();
+      const strokePath = (pts) => { ctx.beginPath(); pts.forEach((p, k) => { const [x, y] = toScreen(...srcToFo(p[0], p[1])); if (k) ctx.lineTo(x, y); else { ctx.moveTo(x, y); ctx.lineTo(x + 0.01, y); } }); };
+      if (st.fillStroke) {
+        // the area being painted for a fill
+        ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(255,70,90,.45)'; ctx.lineWidth = Math.max(2, st.fillStroke.r * 2 * L * mainPane().scale);
+        strokePath(st.fillStroke.pts); ctx.stroke(); ctx.restore();
+      }
       spots.forEach((sp, i) => {
+        if (sp.mode === 'fill') {
+          const sel = i === st.spotSel;
+          ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+          if (sel) { ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = Math.max(2, sp.r * 2 * L * mainPane().scale); strokePath(sp.pts); ctx.stroke(); }
+          ctx.strokeStyle = sel ? '#fff' : 'rgba(255,255,255,.7)'; ctx.lineWidth = sel ? 1.6 : 1;
+          strokePath(sp.pts); ctx.stroke(); ctx.restore();
+          return;
+        }
         const [dx, dy] = toScreen(...srcToFo(sp.x, sp.y));
         const [sx, sy] = toScreen(...srcToFo(sp.sx, sp.sy));
         const rr = sp.r * L * mainPane().scale;
@@ -509,6 +524,11 @@
       const L = longEdge(), sc = mainPane().scale;
       for (let i = spots.length - 1; i >= 0; i--) {
         const sp = spots[i];
+        if (sp.mode === 'fill') {
+          const rf = Math.max(6, sp.r * L * sc);
+          if (sp.pts.some(p => { const [qx, qy] = toScreen(...srcToFo(p[0], p[1])); return Math.hypot(sx - qx, sy - qy) <= rf; })) return { i, part: 'fill' };
+          continue;
+        }
         const [dx, dy] = toScreen(...srcToFo(sp.x, sp.y));
         const rr = Math.max(6, sp.r * L * sc);
         if (Math.hypot(sx - dx, sy - dy) <= rr) return { i, part: 'dest' };
@@ -765,6 +785,7 @@
         if (hit) {
           st.spotSel = hit.i; events.emit('spotSel');
           const spots = st.photo.settings.spots, one = spots[hit.i];
+          if (hit.part === 'fill') { draw(); return; }           // a fill belongs to where it was painted: it is selected, not moved
           // a stroke moves as one piece
           const starts = new Map((one.g ? spots.filter(q => q.g === one.g) : [one]).map(q => [q, P.clone(q)]));
           drag = { kind: 'spot', i: hit.i, part: hit.part, x, y, start: P.clone(one), starts };
@@ -773,6 +794,13 @@
         const [u, v] = foToSrc(fo[0], fo[1]);
         if (u < 0 || v < 0) return;
         const r = st.spotSize;
+        if (st.spotMode === 'fill') {
+          // paint over what should go; the fill is made when the button is let go
+          st.spotSel = -1;
+          st.fillStroke = { pts: [[u, v]], r };
+          drag = { kind: 'fillStroke', last: [u, v], r };
+          draw(); return;
+        }
         const [su, sv] = autoSource(u, v, r);
         st.photo.settings.spots.push({ id: Cat.uid('sp_'), x: u, y: v, r, sx: su, sy: sv, mode: st.spotMode, feather: st.spotFeather, opacity: st.spotOpacity });
         st.spotSel = st.photo.settings.spots.length - 1;
@@ -856,6 +884,12 @@
         let ang = drag.ang0 + (a - drag.a0) * 180 / Math.PI;
         setStraighten(ang, 'live');
         events.emit('geo');
+        return;
+      }
+      if (drag.kind === 'fillStroke') {
+        const [u, v] = foToSrc(...toFo(x, y, pane));
+        if (u < 0 || v < 0 || st.fillStroke.pts.length >= 300) return;
+        if (Math.hypot(u - drag.last[0], v - drag.last[1]) >= drag.r * 0.35) { st.fillStroke.pts.push([u, v]); drag.last = [u, v]; draw(); }
         return;
       }
       if (drag.kind === 'spotStroke') {
@@ -956,6 +990,16 @@
         update('commit'); events.emit('geo');
       } else if (d.kind === 'cropMove' || d.kind === 'cropHandle') {
         events.emit('geo');
+      } else if (d.kind === 'fillStroke') {
+        const stroke = st.fillStroke, photo = st.photo;
+        const sp = { id: Cat.uid('sp_'), mode: 'fill', x: stroke.pts[0][0], y: stroke.pts[0][1], sx: stroke.pts[0][0], sy: stroke.pts[0][1], r: stroke.r, pts: stroke.pts, feather: st.spotFeather, opacity: st.spotOpacity };
+        PJ.UI.activity('Filling from the surroundings…', 0.5);
+        PJ.Fill.create(photo, sp, photo.settings.spots.slice()).then(() => {
+          photo.settings.spots.push(sp);
+          Cat.commit(photo, 'Fill');
+          if (st.photo === photo) { st.spotSel = photo.settings.spots.length - 1; update('commit'); events.emit('spotSel'); }
+        }).catch((e) => PJ.UI.toast(String(e && e.message || e), 'triangle-exclamation'))
+          .finally(() => { PJ.UI.activity('', 0); if (st.fillStroke === stroke) st.fillStroke = null; draw(); });
       } else if (d.kind === 'spotStroke') {
         const what = st.spotMode === 'clone' ? 'Clone' : 'Heal';
         Cat.commit(st.photo, d.n > 1 ? `${what} stroke` : `${what} spot`);

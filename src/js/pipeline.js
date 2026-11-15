@@ -691,6 +691,30 @@
     const out = new Uint8ClampedArray(data);
     const L = Math.max(W, H);
     for (const sp of spots) {
+      if (sp.mode === 'fill') {
+        // content-aware fill: a piece made once from the surroundings (fill.js), laid in through its own soft edge
+        const pm = sp.patch ? maskMaps.get(sp.patch.id) : null;
+        if (!pm || pm.data.length !== pm.w * pm.h * 4) continue;
+        const bx = sp.patch.x * L, by = sp.patch.y * L, bw = sp.patch.w * L, bh = sp.patch.h * L, op = clamp((sp.opacity ?? 100) / 100, 0, 1);
+        const fx0 = Math.max(0, Math.floor(bx)), fx1 = Math.min(W - 1, Math.ceil(bx + bw)), fy0 = Math.max(0, Math.floor(by)), fy1 = Math.min(H - 1, Math.ceil(by + bh));
+        const pd = pm.data, pw = pm.w, ph = pm.h;
+        for (let y = fy0; y <= fy1; y++) {
+          const fv = clamp((y + 0.5 - by) / bh * ph - 0.5, 0, ph - 1), v0 = fv | 0, v1 = Math.min(ph - 1, v0 + 1), tv = fv - v0;
+          for (let x = fx0; x <= fx1; x++) {
+            const fu = clamp((x + 0.5 - bx) / bw * pw - 0.5, 0, pw - 1), u0 = fu | 0, u1 = Math.min(pw - 1, u0 + 1), tu = fu - u0;
+            const a = (v0 * pw + u0) * 4, b = (v0 * pw + u1) * 4, c = (v1 * pw + u0) * 4, d = (v1 * pw + u1) * 4;
+            const w00 = (1 - tu) * (1 - tv), w10 = tu * (1 - tv), w01 = (1 - tu) * tv, w11 = tu * tv;
+            const al = (pd[a + 3] * w00 + pd[b + 3] * w10 + pd[c + 3] * w01 + pd[d + 3] * w11) / 255 * op;
+            if (al <= 0) continue;
+            const di = (y * W + x) * 4;
+            for (let k = 0; k < 3; k++) {
+              const pv = pd[a + k] * w00 + pd[b + k] * w10 + pd[c + k] * w01 + pd[d + k] * w11;
+              out[di + k] = out[di + k] + (pv - out[di + k]) * al;
+            }
+          }
+        }
+        continue;
+      }
       const cx = sp.x * L, cy = sp.y * L, R = Math.max(1, sp.r * L);
       const ddx = (sp.sx - sp.x) * L, ddy = (sp.sy - sp.y) * L;
       const feather = clamp((sp.feather ?? 50) / 100, 0, 1), opacity = clamp((sp.opacity ?? 100) / 100, 0, 1);

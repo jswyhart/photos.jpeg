@@ -938,9 +938,10 @@
     }
     function buildSpotPane() {
       const st = viewer.st;
-      const mode = UI.seg([{ label: 'Heal', value: 'heal' }, { label: 'Clone', value: 'clone' }], st.spotMode, (v) => {
+      const mode = UI.seg([{ label: 'Heal', value: 'heal' }, { label: 'Clone', value: 'clone' }, { label: 'Fill', value: 'fill' }], st.spotMode, (v) => {
         st.spotMode = v;
         const sp = photo && photo.settings.spots[st.spotSel];
+        if (v === 'fill' || (sp && sp.mode === 'fill')) { viewer.st.spotSel = -1; buildToolPane(); viewer.draw(); return; }   // a fill is painted, not converted
         if (sp) { sp.mode = v; Cat.commit(photo, 'Spot mode'); viewer.update('commit'); }
       });
       const spotSl = (label, key, min, max, step, toSpot, fromSpot) => UI.slider({
@@ -949,6 +950,7 @@
         onInput: (v, phase) => {
           st[key] = key === 'spotSize' ? v / 100 : v;
           const sp = photo && photo.settings.spots[st.spotSel];
+          if (sp && sp.mode === 'fill' && key !== 'spotOpacity') return viewer.draw();      // a fill's shape is fixed when it is made; its opacity is not
           if (sp) { toSpot(sp, v); if (phase === 'commit') Cat.commit(photo, `Spot ${label}`); viewer.update(phase); }
           else viewer.draw();
         }
@@ -967,7 +969,7 @@
           h('button', { class: 'btn sm', disabled: st.spotSel < 0, onclick: () => viewer.deleteSelectedSpot() }, icon('trash-can'), 'Delete'),
           h('button', { class: 'btn sm', onclick: () => { if (!photo || !photo.settings.spots.length) return; photo.settings.spots = []; st.spotSel = -1; Cat.commit(photo, 'Clear spots'); viewer.update('commit'); buildToolPane(); } }, 'Clear all'),
           h('span', { class: 'spacer' }), h('button', { class: 'btn sm primary', onclick: () => viewer.setTool('spot') }, 'Done')),
-        h('div', { class: 'curve-hint' }, 'Click a blemish to heal it — a matching source is picked automatically. Drag circles to adjust · Alt-drag moves only the target · Delete removes the selected spot.'));
+        h('div', { class: 'curve-hint' }, st.spotMode === 'fill' ? 'Fill: paint over what should go — a person, a sign, a wire. The area is rebuilt from what is around it. Delete removes the selected fill.' : 'Click a blemish to heal it — a matching source is picked automatically. Drag circles to adjust · Alt-drag moves only the target · Delete removes the selected spot.'));
     }
     let aiBusy = false;
     function buildMaskPane() {

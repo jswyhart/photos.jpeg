@@ -511,6 +511,12 @@
   /** Settings that came from another photo: its Subject / Sky / People masks are found again in each target. */
   async function refindMasks(photos, partial) {
     const out = { redone: 0, empty: 0 };
+    // content-aware fills that came along are made again from each photo's own surroundings
+    if (PJ.Fill && PJ.Fill.hasFill(partial)) {
+      let k = 0;
+      for (const p of photos) { UI.activity(`Filling in ${p.name}…`, ++k / (photos.length + 1)); try { await PJ.Fill.retarget(p); } catch (e) { console.warn('fill', p.name, e && e.message); } }
+      UI.activity('');
+    }
     if (!PJ.AIMask || !PJ.AIMask.hasAi(partial)) return out;
     let n = 0;
     for (const p of photos) {
@@ -709,7 +715,10 @@
   /** Everything in the thumbnail store that the catalog still refers to: previews, LUTs, mask shapes (also those only an undo step or a snapshot names). */
   function storeKeys() {
     const keep = new Set();
-    const masksOf = (s) => { if (s && s.masks) for (const m of s.masks) if (m.map && m.map.id) keep.add('mm_' + m.map.id); };
+    const masksOf = (s) => {
+      if (s && s.masks) for (const m of s.masks) if (m.map && m.map.id) keep.add('mm_' + m.map.id);
+      if (s && s.spots) for (const sp of s.spots) if (sp.patch && sp.patch.id) keep.add('cf_' + sp.patch.id);
+    };
     for (const p of Cat.state.photos) {
       keep.add(p.id);
       for (const f of p.faces || []) if (f.t) keep.add(f.t);

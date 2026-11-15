@@ -102,6 +102,15 @@
         return;
       }
       // mask maps this render's settings name, which this worker hasn't been given yet
+      // … and the filled pieces of its content-aware fills (kept in the same store)
+      for (const sp of (job.settings && job.settings.spots) || []) {
+        if (sp.mode !== 'fill' || !sp.patch || rec.maps.has(sp.patch.id)) continue;
+        const mm = P.getMaskMap(sp.patch.id);
+        if (!mm) continue;
+        const buf = mm.data.slice().buffer;
+        rec.w.postMessage({ type: 'maskMap', id: sp.patch.id, w: mm.w, h: mm.h, buffer: buf }, [buf]);
+        rec.maps.add(sp.patch.id);
+      }
       for (const m of (job.settings && job.settings.masks) || []) {
         if (!m.map || rec.maps.has(m.map.id)) continue;
         const mm = P.getMaskMap(m.map.id);
@@ -427,6 +436,7 @@
   async function render(photo, settings, level, opts, priority, want) {
     // Subject / Sky / People masks: their shapes have to be in memory before a worker can use them
     if (PJ.AIMask && settings && settings.masks && !PJ.AIMask.ready(settings)) await PJ.AIMask.ensure(photo, settings);
+    if (PJ.Fill && settings && settings.spots && !PJ.Fill.ready(settings)) await PJ.Fill.ensure(photo, settings);
     const src = level === 'full' ? await ensureFull(photo) : await ensureSource(photo, want || 'best');
     // a stabilized clip's current frame gets its stabilizing transform
     if (photo.kind === 'video' && PJ.Stabilize && settings && settings.stab && settings.stab.amount > 0) settings = PJ.Stabilize.apply(photo, P.normalizeSettings(settings), PJ.Video.defaultTime(photo));
@@ -551,6 +561,7 @@
     if (!gpuReady()) return null;
     // a mask shape that isn't loaded yet: start loading it and let the CPU render (which waits for it) take this frame
     if (PJ.AIMask && !PJ.AIMask.ready(settings)) { PJ.AIMask.ensure(photo, settings).catch(() => { }); return null; }
+    if (PJ.Fill && !PJ.Fill.ready(settings)) { PJ.Fill.ensure(photo, settings).catch(() => { }); return null; }
     const src = cachedSource(photo);
     if (!src || !src.proxy) return null;
     try {
