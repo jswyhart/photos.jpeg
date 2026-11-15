@@ -89,10 +89,18 @@
     // what is where around the hole (sky, trees, road …), when the scene model is there to say
     let label = null;
     try {
-      const lm = PJ.AIMask && PJ.AIMask.labels ? await PJ.AIMask.labels(photo) : null;
+      // the model looks at the piece itself, so its map is fine enough to follow edges inside it;
+      // for a very small piece the map of the whole photo is used instead
+      let lm = PJ.AIMask && PJ.AIMask.labelsOfRegion ? await PJ.AIMask.labelsOfRegion(photo, { x: x0 / W, y: y0 / H, w: bw / W, h: bh / H }) : null;
       if (lm) {
         label = new Uint8Array(pw * ph);
-        for (let y = 0; y < ph; y++) { const ly = Math.min(lm.h - 1, Math.floor((y0 + (y + 0.5) / k) / H * lm.h)); for (let x = 0; x < pw; x++) label[y * pw + x] = lm.data[ly * lm.w + Math.min(lm.w - 1, Math.floor((x0 + (x + 0.5) / k) / W * lm.w))]; }
+        for (let y = 0; y < ph; y++) { const ly = Math.min(lm.h - 1, Math.floor((y + 0.5) / ph * lm.h)); for (let x = 0; x < pw; x++) label[y * pw + x] = lm.data[ly * lm.w + Math.min(lm.w - 1, Math.floor((x + 0.5) / pw * lm.w))]; }
+      } else {
+        lm = PJ.AIMask && PJ.AIMask.labels ? await PJ.AIMask.labels(photo) : null;
+        if (lm) {
+          label = new Uint8Array(pw * ph);
+          for (let y = 0; y < ph; y++) { const ly = Math.min(lm.h - 1, Math.floor((y0 + (y + 0.5) / k) / H * lm.h)); for (let x = 0; x < pw; x++) label[y * pw + x] = lm.data[ly * lm.w + Math.min(lm.w - 1, Math.floor((x0 + (x + 0.5) / k) / W * lm.w))]; }
+        }
       }
     } catch (e) { console.warn('fill: no scene map, filling by texture alone:', e && e.message); }
     const out = await run(label ? { w: pw, h: ph, rgb, mask, label } : { w: pw, h: ph, rgb, mask });
