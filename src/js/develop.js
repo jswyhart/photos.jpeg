@@ -737,7 +737,18 @@
 
     // ---- Calibration ----
     const calPanel = UI.panel({ id: 'd-calib', title: 'Calibration', icon: 'sliders', collapsed: true });
+    // wide colour: a property of the photo (like its file), not an edit — presets, paste and reset leave it alone
+    const wideChk = UI.checkbox('Wide colour (Display P3)', false, (v) => {
+      if (!photo) return;
+      if (v) photo.wide = true; else delete photo.wide;
+      Cat.scheduleSave();
+      viewer.update('commit'); E.queueThumb(photo, true);
+      UI.toast(v ? 'Edited in Display P3: colours beyond sRGB are kept for wide-colour screens and exports' : 'Edited in sRGB', 'palette');
+    });
+    const wideRow = h('div', { class: 'wide-row', title: 'RAW photos only. Keeps the colours the camera recorded beyond sRGB. Turning it on or off can shift strongly saturated colours slightly.' }, wideChk.el);
+    controls.push({ sync: () => { wideRow.style.display = photo && photo.isRaw && photo.kind !== 'video' ? '' : 'none'; wideChk.set(!!(photo && photo.wide)); } });
     calPanel.body.append(
+      wideRow,
       h('div', { class: 'sub' }, 'Shadows'),
       bslider('calib.shadowTint', 'Tint', -100, 100, { rail: 'tint' }),
       h('div', { class: 'sub' }, 'Red Primary'),

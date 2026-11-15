@@ -181,6 +181,41 @@
       decode: (x) => (Math.pow(2, x * Math.log2(16 * 64 + 1)) - 1) / 64
     }
   };
+  /* ---- Wide colour ----
+   * A developed RAW file holds its colours in Display P3 primaries, which reach well past sRGB in
+   * the reds and greens. A photo marked "wide" is edited in that space from end to end and only
+   * narrowed at the very end, for a screen or a file that is sRGB. A photo that is not marked is
+   * brought into sRGB first, exactly as before wide colour existed, so earlier edits look the same. */
+  const SRGB_TO_P3 = [0.8224621, 0.1775380, 0, 0.0331941, 0.9668058, 0, 0.0170827, 0.0723974, 0.9105199];
+  const P3_TO_SRGB = [1.2249401, -0.2249404, 0, -0.0420569, 1.0420571, 0, -0.0196376, -0.0786361, 1.0982735];
+  function mul3(a, b) {
+    const o = new Array(9);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+    return o;
+  }
+  /** True when this render works in wide colour: the photo asks for it and its source carries it. */
+  function isWide(s, opts) {
+    return !!(opts && opts.wide && opts.srcInput && opts.srcInput.space === 'p3' &&
+      !(opts.cube && s.lut && s.lut.stage === 'input' && s.lut.amount > 0) && !(s.input && s.input.profile !== 'none'));
+  }
+  // display-encoded 0…1 ⇄ linear by table (both spaces use the sRGB curve); the encode table is indexed by √linear
+  let TLIN = null, TENC = null;
+  function gamutTables() {
+    if (TLIN) return;
+    TLIN = new Float32Array(4098); TENC = new Float32Array(4098);
+    for (let i = 0; i < 4098; i++) { const v = Math.min(1, i / 4096); TLIN[i] = toLin(v); TENC[i] = toSrgb(v * v); }
+  }
+  const fLin = (v) => { if (v <= 0) return 0; if (v >= 1) return 1; const f = v * 4096, q = f | 0; return TLIN[q] + (TLIN[q + 1] - TLIN[q]) * (f - q); };
+  const fEnc = (l) => { if (l <= 0) return 0; if (l >= 1) return 1; const f = Math.sqrt(l) * 4096, q = f | 0; return TENC[q] + (TENC[q + 1] - TENC[q]) * (f - q); };
+  /** Display-encoded planes from one set of primaries to another (values end inside 0…1). */
+  function convertPlanes(R, G, B, N, M) {
+    gamutTables();
+    for (let i = 0; i < N; i++) {
+      const r = fLin(R[i]), g = fLin(G[i]), b = fLin(B[i]);
+      R[i] = fEnc(M[0] * r + M[1] * g + M[2] * b); G[i] = fEnc(M[3] * r + M[4] * g + M[5] * b); B[i] = fEnc(M[6] * r + M[7] * g + M[8] * b);
+    }
+  }
+
   /** Encode scene-linear into the internal RAW log (inverse of rawlog.decode). */
   function rawLogEncode(lin) { return Math.log2(Math.max(0, lin) * 64 + 1) / Math.log2(16 * 64 + 1); }
   const inputLutCache = {};
@@ -199,16 +234,24 @@
    * A source's own input transform (RAW files decoded to rawlog): per-code LUT to display-linear
    * (base tone curve fitted to the camera's rendering) then a 3×3 colour matrix.
    */
-  function stageSourceInput(R, G, B, N, si) {
-    const lut = si.lut, M = si.matrix, dec = inputLUT('rawlog');
+  function stageSourceInput(R, G, B, N, si, wide) {
+    const lut = si.lut, dec = inputLUT('rawlog'), p3 = si.space === 'p3';
+    // not wide: the source's P3 values go to sRGB before anything else; wide: the camera's colour matrix moves into P3
+    const pre = p3 && !wide ? P3_TO_SRGB : null, K = 1 / Math.log2(16 * 64 + 1);
+    const M = p3 && wide && si.matrix ? mul3(SRGB_TO_P3, mul3(si.matrix, P3_TO_SRGB)) : si.matrix;
     const look = (t, v) => { const f = (v <= 0 ? 0 : v >= 1 ? 1 : v) * 255, i = f | 0, j = i < 255 ? i + 1 : 255; return t[i] + (t[j] - t[i]) * (f - i); };
     for (let i = 0; i < N; i++) {
-      const cr = R[i], cg = G[i], cb = B[i];
+      let cr = R[i], cg = G[i], cb = B[i];
+      let sr = look(dec, cr), sg = look(dec, cg), sb = look(dec, cb);
+      if (pre) {
+        const a = pre[0] * sr + pre[1] * sg + pre[2] * sb, c = pre[3] * sr + pre[4] * sg + pre[5] * sb, d = pre[6] * sr + pre[7] * sg + pre[8] * sb;
+        sr = a > 0 ? a : 0; sg = c > 0 ? c : 0; sb = d > 0 ? d : 0;
+        cr = Math.log2(sr * 64 + 1) * K; cg = Math.log2(sg * 64 + 1) * K; cb = Math.log2(sb * 64 + 1) * K;
+      }
       let r = look(lut, cr), g = look(lut, cg), b = look(lut, cb);
       // Saturated colours (lamps, LEDs, neon) take the curve on their brightest channel and keep
       // their channel ratios, so a red light stays red instead of drifting to pink as it brightens.
       const cmax = cr > cg ? (cr > cb ? cr : cb) : (cg > cb ? cg : cb);
-      const sr = look(dec, cr), sg = look(dec, cg), sb = look(dec, cb);
       const smax = sr > sg ? (sr > sb ? sr : sb) : (sg > sb ? sg : sb), smin = sr < sg ? (sr < sb ? sr : sb) : (sg < sb ? sg : sb);
       if (smax > 1e-6) {
         const sat = (smax - smin) / smax;
@@ -1318,7 +1361,8 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv) {
+    if (conv) gamutTables();
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
     const outw = Math.max(1, reg0.w), outh = Math.max(1, reg0.h);
     const out = new Uint8ClampedArray(outw * outh * 4);
@@ -1330,11 +1374,16 @@
       let si = (j + oy) * w + ox;
       let di = (j * outw) << 2;
       for (let k = 0; k < outw; k++, si++, di += 4) {
+        let x = R[si], y = G[si], z = B[si];
+        if (conv) {
+          const lr = fLin(x), lg = fLin(y), lb = fLin(z);
+          x = fEnc(conv[0] * lr + conv[1] * lg + conv[2] * lb); y = fEnc(conv[3] * lr + conv[4] * lg + conv[5] * lb); z = fEnc(conv[6] * lr + conv[7] * lg + conv[8] * lb);
+        }
         if (out16 !== null) {
-          const q = (j * outw + k) * 3, x = R[si], y = G[si], z = B[si];
+          const q = (j * outw + k) * 3;
           out16[q] = x <= 0 ? 0 : x >= 1 ? 65535 : x * 65535 + 0.5; out16[q + 1] = y <= 0 ? 0 : y >= 1 ? 65535 : y * 65535 + 0.5; out16[q + 2] = z <= 0 ? 0 : z >= 1 ? 65535 : z * 65535 + 0.5;
         }
-        let r = R[si] * 255 + 0.5, g = G[si] * 255 + 0.5, b = B[si] * 255 + 0.5;
+        let r = x * 255 + 0.5, g = y * 255 + 0.5, b = z * 255 + 0.5;
         r = r < 0 ? 0 : r > 255 ? 255 : r | 0; g = g < 0 ? 0 : g > 255 ? 255 : g | 0; b = b < 0 ? 0 : b > 255 ? 255 : b | 0;
         hr[r]++; hg[g]++; hb[b]++;
         hl[(r * 54 + g * 183 + b * 19) >> 8]++;
@@ -1393,9 +1442,10 @@
     const tca = s.lens.tr > 0 ? [s.lens.tr, +s.lens.tvr || 1, +s.lens.tvb || 1, +s.lens.tcr || 0, +s.lens.tcb || 0, +s.lens.tbr || 0, +s.lens.tbb || 0] : null;
     stageGeometry(sdata, W, H, geo, reg, w, h, R, G, B, SX, SY, VF, lensVig, s.lens.vigMid, profVig, tca);
     const cube = opts.cube && s.lut && s.lut.id && s.lut.id === opts.cube.id && s.lut.amount > 0 ? opts.cube : null;
+    const wide = isWide(s, opts);
     if (cube && s.lut.stage === 'input') applyCube(R, G, B, N, cube, s.lut.amount / 100);
     else if (s.input && s.input.profile !== 'none') stageInput(R, G, B, N, s.input);
-    else if (opts.srcInput) stageSourceInput(R, G, B, N, opts.srcInput);
+    else if (opts.srcInput) stageSourceInput(R, G, B, N, opts.srcInput, wide);
 
     // 2. Noise reduction
     const det = s.detail;
@@ -1453,7 +1503,12 @@
     // decided per image (not per band) so every band of a render takes the same path
     if (geo.outW * geo.outH >= COLOR_LUT_MIN_PIXELS && !s.bw && !maskAdj.some(a => a.saturation) && colorSig(s) !== DEFAULT_COLOR_SIG) { const n = lutSizeFor(geo.outW * geo.outH); applyColorLUT(R, G, B, N, cachedColorLUT(s, n), n); }
     else stageColor(R, G, B, N, s, buildCurveLUTs(s.curve), maskW, maskAdj);
-    if (cube && s.lut.stage !== 'input') applyCube(R, G, B, N, cube, s.lut.amount / 100);
+    if (cube && s.lut.stage !== 'input') {
+      // a look is written for sRGB / Rec.709 values: in wide colour it is applied there and brought back
+      if (wide) convertPlanes(R, G, B, N, P3_TO_SRGB);
+      applyCube(R, G, B, N, cube, s.lut.amount / 100);
+      if (wide) convertPlanes(R, G, B, N, SRGB_TO_P3);
+    }
 
     // 7. Effects & sharpening
     stageEffects(R, G, B, w, h, reg, geo.outW, geo.outH, s.effects, rs, job.seed | 0);
@@ -1462,8 +1517,9 @@
     // 8. Output
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
-    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16);
+    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null);
     return {
+      space: wide && opts.outSpace === 'p3' ? 'p3' : 'srgb',
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,
       fullWidth: geo.outW, fullHeight: geo.outH,
       region: { x: reg0.x, y: reg0.y, w: o.outw, h: o.outh },
@@ -1908,5 +1964,6 @@
     autoToneFromHist, clamp, smoothstep, hueVector, blurPlane, hslToRgb, rgbToHsl
   };
   global.PJ = global.PJ || {};
+  Object.assign(api, { isWide, SRGB_TO_P3, P3_TO_SRGB, mul3, convertPlanes });
   global.PJ.Pipeline = api;
 })(typeof self !== 'undefined' ? self : this);

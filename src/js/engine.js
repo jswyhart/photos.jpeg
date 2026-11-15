@@ -229,7 +229,7 @@
    * a second. The full-resolution image is developed again only when it is needed (1:1, export).
    * The key covers the file's identity and the engine version, so a changed file or a newer
    * develop engine never gets a stale image. */
-  const RAW_CACHE_VERSION = 'r1';
+  const RAW_CACHE_VERSION = 'r2';   // r2: developed pixels are in Display P3 primaries
   const rawCacheKey = (photo) => [RAW_CACHE_VERSION, photo.path, photo.size || 0, Math.round(photo.mtime || 0), PROXY_EDGE].join('|');
   async function readRawCache(photo) {
     if (!API.rawCache || !photo.exifLoaded || !photo.width) return null;
@@ -252,7 +252,7 @@
     } catch (_) { draft = Dec.resizePixels(proxy, DRAFT_EDGE); }
     return {
       key: photo.path, proxy, draft, full: null, fullW: hd.fullW, fullH: hd.fullH, exifBytes: null,
-      input: { lut: Float32Array.from(hd.lut), matrix: hd.matrix || null }, quality: 'best', fromCache: true
+      input: { lut: Float32Array.from(hd.lut), matrix: hd.matrix || null, space: hd.space || 'srgb' }, quality: 'best', fromCache: true
     };
   }
   function writeRawCache(photo, src) {
@@ -260,7 +260,7 @@
     try {
       const head = new TextEncoder().encode(JSON.stringify({
         v: 1, w: src.proxy.width, h: src.proxy.height, fullW: src.fullW, fullH: src.fullH,
-        lut: Array.from(src.input.lut), matrix: src.input.matrix || null
+        lut: Array.from(src.input.lut), matrix: src.input.matrix || null, space: src.input.space || 'srgb'
       }));
       const out = new Uint8Array(4 + head.length + src.proxy.data.length);
       new DataView(out.buffer).setUint32(0, head.length, true);
@@ -412,6 +412,11 @@
   }
 
   /* ---------------- Rendering ---------------- */
+  /** Whether this browser can hold Display P3 pixels in a canvas (needed to show wide colour as it is). */
+  const P3_CANVAS = (() => {
+    try { const x = Dec.makeCanvas(1, 1).getContext('2d', { colorSpace: 'display-p3' }); return !!x && x.getContextAttributes().colorSpace === 'display-p3'; }
+    catch (_) { return false; }
+  })();
   function getLevel(src, level) { return level === 'draft' ? src.draft : level === 'full' ? src.full : src.proxy; }
 
   /**
@@ -425,7 +430,7 @@
     const src = level === 'full' ? await ensureFull(photo) : await ensureSource(photo, want || 'best');
     // a stabilized clip's current frame gets its stabilizing transform
     if (photo.kind === 'video' && PJ.Stabilize && settings && settings.stab && settings.stab.amount > 0) settings = PJ.Stabilize.apply(photo, P.normalizeSettings(settings), PJ.Video.defaultTime(photo));
-    if (src.input) opts = Object.assign({}, opts, { srcInput: src.input }); // RAW: per-file base curve & colour
+    if (src.input) opts = Object.assign({}, opts, { srcInput: src.input, wide: !!photo.wide }); // RAW: per-file base curve & colour
     const lutId = settings && settings.lut && settings.lut.id;
     if (lutId && PJ.LUTs) { const cube = await PJ.LUTs.get(lutId); if (cube) opts = Object.assign({}, opts, { cube }); }
     const lv = getLevel(src, level);
@@ -482,6 +487,7 @@
     return {
       data, data16, width: W, height: H, fullWidth: parts[0].fullWidth, fullHeight: parts[0].fullHeight,
       region: { x: parts[0].region.x, y: parts[0].region.y, w: W, h: H }, hist, clip,
+      space: opts && opts.outSpace === 'p3' && P.isWide(nsettings, opts) ? 'p3' : 'srgb',
       ms: performance.now() - t0, level, levelWidth: lv.width, levelHeight: lv.height,
       fullW: src.fullW, fullH: src.fullH
     };
@@ -559,13 +565,15 @@
       }
       gpu.srcW = lv.width; gpu.srcH = lv.height;
       const o = Object.assign({}, opts, { levelScale: 1, fullLong: Math.max(src.fullW, src.fullH), seed: seedFor(photo), target: 'canvas' });
-      if (src.input) o.srcInput = src.input;
+      if (src.input) { o.srcInput = src.input; o.wide = !!photo.wide; }
       if (s.lut.id && PJ.LUTs) { o.cube = PJ.LUTs.getSync(s.lut.id); if (!o.cube) { PJ.LUTs.get(s.lut.id); return null; } }
+      const wide = P.isWide(s, o);
+      if (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0))) return null;   // a look in wide colour, or no P3 canvas: the CPU render does it
       const r = gpu.render(s, o);
       // The frame stays on the GPU: copying it into a plain canvas needs no readback, so live
       // drags can keep up with the display's refresh rate.
       const canvas = Dec.makeCanvas(r.width, r.height);
-      canvas.getContext('2d').drawImage(gpu.canvas, 0, 0);
+      canvas.getContext('2d', wide ? { colorSpace: 'display-p3' } : undefined).drawImage(gpu.canvas, 0, 0);
       const stats = gpuStats(r, opts);
       const ms = performance.now() - t0;
       // A GPU slower than the workers (software GL, an overloaded laptop chip) isn't worth it
@@ -574,7 +582,7 @@
       return {
         canvas, width: r.width, height: r.height, fullWidth: r.fullWidth, fullHeight: r.fullHeight,
         region: { x: 0, y: 0, w: r.width, h: r.height }, hist: stats.hist, clip: stats.clip,
-        ms, level: 'proxy', gpu: true, levelWidth: lv.width, levelHeight: lv.height, fullW: src.fullW, fullH: src.fullH
+        ms, level: 'proxy', gpu: true, space: wide ? 'p3' : 'srgb', levelWidth: lv.width, levelHeight: lv.height, fullW: src.fullW, fullH: src.fullH
       };
     } catch (e) {
       console.warn('GPU preview failed; using the CPU from now on', e);
@@ -586,7 +594,9 @@
   function toCanvas(res) {
     if (res.canvas) return res.canvas;
     const c = Dec.makeCanvas(res.width, res.height);
-    c.getContext('2d').putImageData(new ImageData(res.data, res.width, res.height), 0, 0);
+    // a wide-colour result goes into a Display P3 canvas; drawn onto an sRGB one, the browser narrows it
+    if (res.space === 'p3' && P3_CANVAS) c.getContext('2d', { colorSpace: 'display-p3' }).putImageData(new ImageData(res.data, res.width, res.height, { colorSpace: 'display-p3' }), 0, 0);
+    else c.getContext('2d').putImageData(new ImageData(res.data, res.width, res.height), 0, 0);
     return c;
   }
 
@@ -753,7 +763,7 @@
   }
 
   global.PJ.Engine = {
-    PROXY_EDGE, DRAFT_EDGE, pool, ensureSource, cachedSource, needsDevelop, prefetch, ensureFull, render, toCanvas,
+    P3_CANVAS, PROXY_EDGE, DRAFT_EDGE, pool, ensureSource, cachedSource, needsDevelop, prefetch, ensureFull, render, toCanvas,
     queueThumb, thumbStatus: () => ({ active: thumbActive, queued: thumbQueue.size }), thumbEvents, autoTone, autoGrade, autoWB, sampleAt, renderFull, renderGPU, gpuReady, dhash, gpuInfo: () => ({ on: !!gpu && !gpuOff, off: gpuOff }), dropFull, seedFor, invalidate
   };
 })(window);

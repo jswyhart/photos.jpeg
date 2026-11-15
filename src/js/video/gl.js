@@ -134,7 +134,7 @@
   uniform sampler2D uInLut; uniform mat3 uInMat; uniform float uKnee;
   uniform bool uCubeIn; uniform highp sampler3D uCube; uniform float uCubeAmt, uCubeN;   // imported .cube used as a camera LUT
   uniform bool uSI;              // per-file source transform (developed RAW): display LUT, rawlog decode, matrix
-  uniform sampler2D uSiLut, uDecLut; uniform mat3 uSiMat;
+  uniform sampler2D uSiLut, uDecLut; uniform mat3 uSiMat; uniform mat3 uSiPre; uniform bool uSiPreOn;
   float lk(sampler2D t, float v){   // same linear interpolation as the CPU's 256-entry lookups
     float f = clamp(v, 0.0, 1.0) * 255.0; int i = min(int(f), 254);
     return mix(texelFetch(t, ivec2(i, 0), 0).r, texelFetch(t, ivec2(i + 1, 0), 0).r, f - float(i));
@@ -169,8 +169,9 @@
       raw = toSrgb(lin);
     } else if (uSI && inside) {
       vec3 cc = clamp(raw, 0.0, 1.0);
-      vec3 l = vec3(lk(uSiLut, cc.r), lk(uSiLut, cc.g), lk(uSiLut, cc.b));
       vec3 sd = vec3(lk(uDecLut, cc.r), lk(uDecLut, cc.g), lk(uDecLut, cc.b));
+      if (uSiPreOn) { sd = max(uSiPre * sd, 0.0); cc = clamp(log2(sd * 64.0 + 1.0) / 10.0014082, 0.0, 1.0); }
+      vec3 l = vec3(lk(uSiLut, cc.r), lk(uSiLut, cc.g), lk(uSiLut, cc.b));
       float smax = max(sd.r, max(sd.g, sd.b)), smin = min(sd.r, min(sd.g, sd.b));
       if (smax > 1e-6) {
         float sat = (smax - smin) / smax;
@@ -698,6 +699,11 @@
       gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, useLog ? this.inLutTex : this.dummy); gl.uniform1i(pr.locs.uInLut, 5);
       this.bindCube(pr, s, opts, 12, 'input');
       const si = !useLog && opts.srcInput && opts.srcInput.lut ? opts.srcInput : null;
+      // what the numbers in the drawing buffer mean: Display P3 for a wide-colour photo, sRGB otherwise
+      if (opts.target === 'canvas' && 'drawingBufferColorSpace' in gl) {
+        const cs = si && si.space === 'p3' && opts.wide ? 'display-p3' : 'srgb';
+        if (gl.drawingBufferColorSpace !== cs) gl.drawingBufferColorSpace = cs;
+      }
       gl.uniform1i(pr.locs.uSI, si ? 1 : 0);
       if (si) {
         const up = (tex, arr) => {
@@ -712,8 +718,13 @@
         gl.activeTexture(gl.TEXTURE7);
         if (!this.decOk) { up(this.decLutTex, P.inputLUT('rawlog')); this.decOk = true; }
         gl.bindTexture(gl.TEXTURE_2D, this.decLutTex); gl.uniform1i(pr.locs.uDecLut, 7);
-        const m = si.matrix || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+        // wide colour: the camera's matrix moves into P3; otherwise the P3 source is brought to sRGB first (as pipeline.js does)
+        const p3 = si.space === 'p3', wide = p3 && !!opts.wide;
+        const m = si.matrix ? (wide ? P.mul3(P.SRGB_TO_P3, P.mul3(si.matrix, P.P3_TO_SRGB)) : si.matrix) : [1, 0, 0, 0, 1, 0, 0, 0, 1];
         gl.uniformMatrix3fv(pr.locs.uSiMat, false, [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]);
+        const q = P.P3_TO_SRGB;
+        gl.uniform1i(pr.locs.uSiPreOn, p3 && !wide ? 1 : 0);
+        gl.uniformMatrix3fv(pr.locs.uSiPre, false, [q[0], q[3], q[6], q[1], q[4], q[7], q[2], q[5], q[8]]);
       } else {
         gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uSiLut, 6);
         gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uDecLut, 7);

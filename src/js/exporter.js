@@ -300,12 +300,12 @@
     });
   }
 
-  async function encode(canvas, o, photo) {
+  async function encode(canvas, o, photo, from) {
     const prof = exportProfile(o);
-    if (prof.space !== 'srgb') {
+    if (prof.space !== (from || 'srgb')) {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      PJ.ICC.convert(img.data, prof.space, 4, 255);
+      PJ.ICC.convert(img.data, prof.space, 4, 255, from);
       ctx.putImageData(img, 0, 0);
     }
     if (o.format === 'tiff') {
@@ -358,21 +358,24 @@
         const plain = o.resize === 'none' && o.sharpen === 'none' && !(o.wm && o.wmText);
         const warnings = want16 && !plain ? ['16-bit TIFF applies to full-size exports without output sharpening or a watermark — these were written as 8-bit'] : [];
         const settings = (o.settingsOf && o.settingsOf.get(p.id)) || p.settings;
-        const res = await E.renderFull(p, settings, (f) => step(f * 0.7), want16 && plain ? { out16: true } : undefined);
+        // a file in a larger space than sRGB gets the wide-colour render itself (when the photo has one)
+        const wideOut = exportProfile(o).space !== 'srgb' ? { outSpace: 'p3' } : {};
+        const res = await E.renderFull(p, settings, (f) => step(f * 0.7), want16 && plain ? Object.assign({ out16: true }, wideOut) : wideOut);
         let bytes;
         if (want16 && plain && res.data16) {
           const prof = exportProfile(o);
-          if (prof.space !== 'srgb') PJ.ICC.convert(res.data16, prof.space, 3, 65535);
+          if (prof.space !== (res.space || 'srgb')) PJ.ICC.convert(res.data16, prof.space, 3, 65535, res.space);
           step(0.85);
           bytes = encodeTiffRich({ width: res.width, height: res.height, data16: res.data16 }, prof.icc);
         } else {
-          let canvas = E.toCanvas(res);
+          // the canvas steps (resize, sharpening, watermark) work on the numbers as they are; encode() knows which space they are in
+          let canvas = E.toCanvas(Object.assign({}, res, { space: 'srgb' }));
           const [tw, th] = targetSize(canvas.width, canvas.height, o);
           canvas = resizeCanvas(canvas, tw, th);
           if (o.sharpen !== 'none') outputSharpen(canvas, o.sharpen);
           watermark(canvas, o);
           step(0.85);
-          bytes = await encode(canvas, o, p);
+          bytes = await encode(canvas, o, p, res.space);
         }
         let dir = o.dest === 'same' && API.supportsSameFolder ? API.dirname(p.path) : folder;
         if (o.useSub && o.subfolder) dir = API.joinPath(dir, o.subfolder.replace(/[\\/:*?"<>|]+/g, '_'));

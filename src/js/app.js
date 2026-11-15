@@ -1055,6 +1055,7 @@
         h('h4', null, 'Performance'),
         row('GPU previews', gpu.off ? 'Not available on this computer (no hardware WebGL2)' : 'Sliders render on the graphics card while you drag; the final image is always rendered exactly.', chk('gpu.preview', true)),
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
+        row('Wide colour for new RAW photos', 'RAW photos added from now on are edited in Display P3. Each photo can be switched in Develop → Calibration.', chk('raw.wide', true)),
         h('h4', null, 'Import'),
         row('Apply lens profiles on import', 'New photos get the distortion and vignetting correction for their lens from the lens database.', chk('lens.autoProfile', false)),
         row('Apply noise reduction by ISO on import', 'New photos taken at ISO 400 and above start with luminance and colour noise reduction to match.', chk('nr.autoIso', false)),

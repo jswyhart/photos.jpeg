@@ -72,13 +72,17 @@
   }
 
   /**
-   * Convert sRGB pixel values in place to another space's encoding.
-   * data: RGBA 8-bit (step 4) or RGB 16-bit (step 3); values stay inside 0…max because sRGB lies inside both spaces.
+   * Convert pixel values in place to another space's encoding. `from` is 'srgb' (default) or 'p3'
+   * (a wide-colour render). data: RGBA 8-bit (step 4) or RGB 16-bit (step 3). Colours the target
+   * space cannot hold are clipped to it.
    */
-  function convert(data, space, step, max) {
+  function convert(data, space, step, max, from) {
     const sp = SPACES[space];
-    if (!sp || !sp.from) return;
-    const m = sp.from, n = max + 1;
+    from = from === 'p3' ? 'p3' : 'srgb';
+    if (!sp || from === space) return;
+    let m = sp.from || [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    if (from === 'p3') m = PJ.Pipeline.mul3(m, PJ.Pipeline.P3_TO_SRGB);     // a wide-colour render: P3 → sRGB → the file's space, without clipping in between
+    const n = max + 1;
     const dec = new Float32Array(n), encN = 4096, enc = new Float32Array(encN + 1);
     for (let i = 0; i < n; i++) dec[i] = srgbToLin(i / max);
     for (let i = 0; i <= encN; i++) { const v = i / encN; enc[i] = (sp.gamma ? Math.pow(v, 1 / sp.gamma) : linToSrgb(v)) * max; }

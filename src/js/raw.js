@@ -242,7 +242,9 @@
     // colour noise cleanup scaled by ISO (the camera's JPEG does the same)
     const iso = preview && preview.exif && +preview.exif.iso || 400;
     const chromaNR = iso >= 1600 ? 0.95 : iso >= 800 ? 0.85 : iso >= 400 ? 0.65 : 0.4;
-    const devOpts = { wb, m, exposure: EXPOSURE, half: !!(opts && opts.half), orientation, chromaNR };
+    // the developed pixels are kept in Display P3 primaries, so colours a camera sees beyond sRGB survive
+    // (everything above was fitted against the camera's sRGB preview, and stays in sRGB terms)
+    const devOpts = { wb, m: P.mul3(P.SRGB_TO_P3, m), exposure: EXPOSURE, half: !!(opts && opts.half), orientation, chromaNR };
     let b = null;
     // Bayer files are demosaiced in horizontal strips on every worker at once
     if (a.raw.parallel && P.SHARED && !devOpts.half && pool.workers.length > 1) {
@@ -259,7 +261,7 @@
     PJ.Raw.lastFit = { name: photo.name, wb, m, S, curvePts, cells: use.length };
     return {
       pixels, width: b.width, height: b.height,
-      input: { lut, matrix: S },
+      input: { lut, matrix: S, space: 'p3' },
       note: `RAW · ${info.model || info.make}${info.matrixSource ? '' : ' (colour fitted)'} · WB ${wbSource}`,
       fit: { wb, curvePts, cells: use.length, matrix: info.matrixSource }
     };

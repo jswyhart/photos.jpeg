@@ -110,7 +110,7 @@
     /* ---------------- rendering ---------------- */
     function geoSig(s) { return JSON.stringify([s.geo, s.transform, s.lens.distortion, s.lens.pr, s.lens.p1, s.lens.p2, s.lens.p3, s.lens.p4, st.tool === 'crop']); }
     function renderOpts(extra) {
-      const o = { clipping: st.clipping, cropOverride: null };
+      const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS ? 'p3' : 'srgb' };
       if (st.tool === 'crop') {
         const s = srcInfo();
         // crop override must be expressed for the level being rendered; normalized so identical
@@ -190,7 +190,7 @@
       const sig = geoSig(photo.settings) + photo.id;
       if (st.before && st.before.sig === sig) return;
       try {
-        const res = await E.render(photo, P.clone(photo.settings), 'proxy', { before: true }, 0);
+        const res = await E.render(photo, P.clone(photo.settings), 'proxy', { before: true, outSpace: E.P3_CANVAS ? 'p3' : 'srgb' }, 0);
         if (res && photo === st.photo) {
           const [fw, fh] = foDims();
           st.before = { canvas: E.toCanvas(res), w: fw, h: fh, sig };
@@ -249,7 +249,7 @@
     }
     function draw() {
       const dpr = sizeCanvases();
-      const ctx = cv.getContext('2d');
+      const ctx = cv.getContext('2d', E.P3_CANVAS ? { colorSpace: 'display-p3' } : undefined);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cv.width, cv.height);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
