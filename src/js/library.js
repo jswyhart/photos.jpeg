@@ -79,8 +79,25 @@
         const r = ka < kb ? -1 : ka > kb ? 1 : idx.get(a.id) - idx.get(b.id);
         return view.desc ? -r : r;
       });
-      return list;
+      return collapseStacks(list);
     }
+
+    /* Stacks: photos grouped under one thumbnail (a burst, a RAW + JPEG pair). A collapsed stack
+       shows its first photo in the current sort order; the badge on it opens and closes the stack. */
+    const openStacks = new Set();
+    let stackCounts = new Map();
+    function collapseStacks(list) {
+      stackCounts = new Map();
+      for (const p of list) if (p.stack) stackCounts.set(p.stack, (stackCounts.get(p.stack) || 0) + 1);
+      const seen = new Set();
+      return list.filter(p => {
+        if (!p.stack || stackCounts.get(p.stack) < 2 || openStacks.has(p.stack)) return true;
+        if (seen.has(p.stack)) return false;
+        seen.add(p.stack);
+        return true;
+      });
+    }
+    function toggleStack(id) { if (!id) return; if (openStacks.has(id)) openStacks.delete(id); else openStacks.add(id); app.refresh(); }
 
     /* ---------------- LEFT ---------------- */
     const catalogList = h('div', { class: 'list' });
@@ -272,6 +289,10 @@
       const img = src ? h('img', { src, draggable: 'false', loading: 'lazy' }) : h('div', { class: 'ph' }, icon(p.missing ? 'triangle-exclamation' : 'image'));
       if (src) img.onerror = () => { img.replaceWith(h('div', { class: 'ph' }, icon('image'))); E.queueThumb(p); };
       const badges = h('div', { class: 'badges' },
+        p.stack && stackCounts.get(p.stack) > 1 ? h('span', {
+          class: 'badge stack', title: openStacks.has(p.stack) ? 'Part of an open stack — click to close it' : `Stack of ${stackCounts.get(p.stack)} — click to open`,
+          onclick: (e) => { e.stopPropagation(); toggleStack(p.stack); }
+        }, icon('layer-group'), ' ', String(stackCounts.get(p.stack))) : null,
         p.virtualOf ? h('span', { class: 'badge vc', title: 'Virtual copy' }, 'VC') : null,
         p.edited ? h('span', { class: 'badge edit', title: 'Edited' }, icon('sliders')) : null,
         p.isRaw ? h('span', { class: 'badge raw' }, p.video && p.video.cdng ? 'CDNG' : p.format) : null,
@@ -532,7 +553,7 @@
     }
 
     return {
-      left, right, topbar, bottombar, render, updateSelection, updateCell, scrollToActive, visible, renderLeft, renderRight, empty,
+      left, right, topbar, bottombar, toggleStack, stackOpen: (id) => openStacks.has(id), render, updateSelection, updateCell, scrollToActive, visible, renderLeft, renderRight, empty,
       showStage, setMode, setGeoFilter, columns: () => vgrid.columns(), map,
       sourceLabel() {
         const k = view.source;

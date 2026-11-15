@@ -542,6 +542,158 @@
     for (const p of ts) { p.settings = Cat.applyGroups(p.settings, partial, groups); Cat.commit(p, `Preset: ${preset.name}`); afterSettings(p); }
     UI.toast(`Applied “${preset.name}” to ${ts.length} photo(s)`);
   }
+  /* ---------------- compare ---------------- */
+  /** Two to six selected photos side by side, to pick the best: rate, flag and reject without leaving the view. */
+  function compareView() {
+    const list = (sel.size > 1 ? visibleList.filter(p => sel.has(p.id)) : []).filter(p => !p.missing).slice(0, 6);
+    if (list.length < 2) return UI.toast('Select 2 to 6 photos to compare', 'circle-info');
+    let focus = Math.max(0, list.findIndex(p => p.id === active));
+    const cols = list.length <= 3 ? list.length : list.length === 4 ? 2 : 3;
+    const grid = h('div', { class: 'grid', style: { gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${Math.ceil(list.length / cols)}, 1fr)` } });
+    const panes = list.map((p, i) => {
+      const cv = h('canvas'), cap = h('div', { class: 'cap' });
+      const pane = h('div', { class: 'pane', onclick: () => { focus = i; paint(); } }, cv, cap);
+      grid.appendChild(pane);
+      return { p, cv, cap, pane };
+    });
+    const paint = () => panes.forEach((q, i) => {
+      q.pane.className = `pane${i === focus ? ' on' : ''}${q.p.flag === -1 ? ' rejected' : ''}`;
+      q.cap.replaceChildren(h('span', { class: 'name' }, `${i + 1}  ${Cat.displayName(q.p)}`),
+        q.p.flag === 1 ? icon('flag', 'flag-pick') : q.p.flag === -1 ? icon('ban', 'flag-reject') : null,
+        h('span', { class: 'stars' }, '★'.repeat(q.p.rating || 0) + '☆'.repeat(5 - (q.p.rating || 0))));
+    });
+    const draw = async (q) => {
+      // the camera preview first (instant), then the developed image
+      for (const want of ['any', 'best']) {
+        try {
+          const res = await E.render(q.p, P.clone(q.p.settings), 'proxy', {}, want === 'any' ? 0 : 1, want);
+          if (!res || !root.isConnected) return;
+          const img = E.toCanvas(res);
+          q.cv.width = img.width; q.cv.height = img.height;
+          q.cv.getContext('2d').drawImage(img, 0, 0);
+        } catch (e) { console.warn('compare: could not render', q.p.name, e && e.message); }
+        if (!E.needsDevelop(q.p)) break;
+      }
+    };
+    const close = () => { window.removeEventListener('keydown', onKey, true); root.remove(); refresh(); };
+    const set = (fn) => { fn(panes[focus].p); Cat.scheduleSave(); paint(); };
+    const onKey = (e) => {
+      const k = e.key.toLowerCase();
+      e.stopPropagation();
+      if (k === 'escape' || k === 'c') { e.preventDefault(); return close(); }
+      if (k === 'arrowright' || k === 'arrowdown') { e.preventDefault(); focus = (focus + 1) % panes.length; return paint(); }
+      if (k === 'arrowleft' || k === 'arrowup') { e.preventDefault(); focus = (focus + panes.length - 1) % panes.length; return paint(); }
+      if (/^[0-5]$/.test(k)) { e.preventDefault(); return set(p => { p.rating = +k; }); }
+      if (k === 'p') { e.preventDefault(); return set(p => { p.flag = 1; }); }
+      if (k === 'x') { e.preventDefault(); return set(p => { p.flag = -1; }); }
+      if (k === 'u') { e.preventDefault(); return set(p => { p.flag = 0; }); }
+      if (k === 'enter') { e.preventDefault(); const p = panes[focus].p; close(); return openDevelop(p.id); }
+      e.preventDefault();
+    };
+    const root = h('div', { class: 'compare' },
+      h('div', { class: 'bar' }, h('b', null, `Compare ${list.length} photos`),
+        h('span', { class: 'muted' }, '←/→ choose · 0–5 rate · P pick · X reject · U unflag · Enter open in Develop · Esc close'),
+        h('span', { style: { flex: 1 } }), h('button', { class: 'btn sm', onclick: close }, icon('xmark'), 'Close')),
+      grid);
+    document.body.appendChild(root);
+    window.addEventListener('keydown', onKey, true);
+    paint();
+    panes.forEach(draw);
+    return { close, panes };
+  }
+
+  /* ---------------- stacks ---------------- */
+  function stackSelection() {
+    const ts = selectedPhotos();
+    if (ts.length < 2) return UI.toast('Select two or more photos to stack', 'circle-info');
+    const id = ts.find(p => p.stack) ? ts.find(p => p.stack).stack : Cat.uid('stack_');
+    const merged = new Set(ts.map(p => p.stack).filter(Boolean));
+    for (const p of Cat.state.photos) if (merged.has(p.stack)) p.stack = id;       // stacks that were touched join the new one
+    ts.forEach(p => { p.stack = id; });
+    Cat.scheduleSave(); refresh();
+    UI.toast(`Stacked ${Cat.state.photos.filter(p => p.stack === id).length} photos`);
+  }
+  function unstackSelection() {
+    const ids = new Set(selectedPhotos().map(p => p.stack).filter(Boolean));
+    if (!ids.size) return UI.toast('The selection isn\'t part of a stack', 'circle-info');
+    let n = 0;
+    for (const p of Cat.state.photos) if (ids.has(p.stack)) { delete p.stack; n++; }
+    Cat.scheduleSave(); refresh();
+    UI.toast(`Unstacked ${n} photos`);
+  }
+  /** Bursts (shots within two seconds of each other) and RAW + JPEG pairs of the same name become stacks. */
+  function autoStack() {
+    const list = (sel.size > 1 ? selectedPhotos() : visibleList).filter(p => !p.stack && !p.virtualOf && p.kind !== 'video');
+    const byTime = list.filter(p => p.captureTime).sort((a, b) => a.captureTime < b.captureTime ? -1 : a.captureTime > b.captureTime ? 1 : 0);
+    let made = 0, cur = null, last = 0;
+    const start = (a, b) => { const id = Cat.uid('stack_'); a.stack = b.stack = id; made++; return id; };
+    for (let i = 1; i < byTime.length; i++) {
+      const a = byTime[i - 1], b = byTime[i];
+      const gap = (new Date(b.captureTime) - new Date(a.captureTime)) / 1000;
+      if (gap >= 0 && gap <= 2 && a.folder === b.folder) { if (cur && last === i - 1) b.stack = cur; else cur = start(a, b); last = i; }
+    }
+    const byName = new Map();
+    for (const p of list) { const k = (p.folder + '/' + p.name.replace(/\.[^.]+$/, '')).toLowerCase(); if (!byName.has(k)) byName.set(k, []); byName.get(k).push(p); }
+    for (const g of byName.values()) if (g.length > 1 && g.some(p => p.isRaw) && g.some(p => !p.isRaw)) {
+      const id = g.find(p => p.stack) ? g.find(p => p.stack).stack : (made++, Cat.uid('stack_'));
+      g.forEach(p => { p.stack = id; });
+    }
+    Cat.scheduleSave(); refresh();
+    UI.toast(made ? `Made ${made} stack${made === 1 ? '' : 's'}` : 'No bursts or RAW + JPEG pairs found', made ? undefined : 'circle-info');
+  }
+
+  /* ---------------- printing ---------------- */
+  /** File → Print: a contact sheet of the selection (or one photo per page), through the system print dialog. */
+  function printDialog() {
+    const ts = targets().filter(p => !p.missing);
+    if (!ts.length) return UI.toast('Select photos to print', 'circle-info');
+    const o = Object.assign({ cols: ts.length === 1 ? 1 : 5, names: true, dates: false, title: '' }, Cat.pref('print.last', {}));
+    if (ts.length === 1) o.cols = 1;
+    const cols = h('select', null, [[1, 'One photo per page'], [2, '2 across'], [3, '3 across'], [4, '4 across'], [5, '5 across'], [6, '6 across'], [8, '8 across']].map(([v, l]) => h('option', { value: v }, l)));
+    cols.value = String(o.cols);
+    const title = h('input', { type: 'text', value: o.title, placeholder: 'Optional heading', style: { width: '100%' } });
+    const names = UI.checkbox('File names', o.names, (v) => { o.names = v; }), dates = UI.checkbox('Capture dates', o.dates, (v) => { o.dates = v; });
+    UI.modal({
+      title: `Print ${ts.length} photo${ts.length === 1 ? '' : 's'}`, icon: 'print',
+      body: h('div', null,
+        h('label', { class: 'field' }, h('span', null, 'Layout'), cols),
+        h('label', { class: 'field' }, h('span', null, 'Heading'), title),
+        h('div', { class: 'row', style: { gap: '14px' } }, names.el, dates.el),
+        h('p', { class: 'muted', style: { fontSize: '11px', marginTop: '10px' } }, 'Paper size, margins and the printer (or “Save as PDF”) are chosen in the print dialog that opens next.')),
+      buttons: [{ label: 'Cancel' }, { label: 'Print…', primary: true, onClick: () => { o.cols = +cols.value; o.title = title.value.trim(); Cat.setPref('print.last', o); printSheet(ts, o); } }]
+    });
+  }
+  async function printSheet(ts, o) {
+    UI.activity('Preparing the print…', 0);
+    const old = document.getElementById('print-root'); if (old) old.remove();
+    const sheet = h('div', { class: 'sheet', style: { gridTemplateColumns: `repeat(${o.cols}, 1fr)` } });
+    const root = h('div', { id: 'print-root' }, o.title ? h('h1', null, o.title) : null, sheet);
+    // small cells print from the thumbnails; larger ones from a rendered preview so they stay sharp on paper
+    const level = o.cols <= 2 ? 'proxy' : o.cols <= 4 ? 'draft' : null;
+    const loads = [];
+    for (let i = 0; i < ts.length; i++) {
+      const p = ts[i];
+      let src = p.thumbV ? API.thumbUrl(p.id, p.thumbV) : '';
+      if (level || !src) {
+        try { const res = await E.render(p, P.clone(p.settings), level || 'draft', {}, 1, level === 'proxy' ? 'best' : 'any'); if (res) src = E.toCanvas(res).toDataURL('image/jpeg', 0.9); }
+        catch (e) { console.warn('print: could not render', p.name, e && e.message); }
+      }
+      if (!src) continue;
+      const img = h('img', { src });
+      loads.push(new Promise(r => { img.onload = img.onerror = r; }));
+      const cap = [o.names ? Cat.displayName(p) : '', o.dates && p.captureTime ? p.captureTime.slice(0, 10) : ''].filter(Boolean).join(' · ');
+      sheet.appendChild(h('figure', o.cols === 1 ? { style: { breakAfter: 'page' } } : null, img, cap ? h('figcaption', null, cap) : null));
+      UI.activity('Preparing the print…', (i + 1) / ts.length);
+    }
+    document.body.appendChild(root);
+    await Promise.all(loads);
+    UI.activity('');
+    const done = () => { window.removeEventListener('afterprint', done); root.remove(); };
+    window.addEventListener('afterprint', done);
+    window.print();
+    return root;
+  }
+
   /** Photo → Apply Lens Profile: each selected photo gets the database profile of its own lens, focal length and aperture. */
   async function lensProfileSelection() {
     const ts = targets();
@@ -798,6 +950,7 @@
       if (kl === 's' && e.shiftKey) { e.preventDefault(); return syncSettings(); }
       if (kl === 's' && !e.shiftKey && !e.altKey) { e.preventDefault(); return xmpWrite(targets()); }
       if (k === ',') { e.preventDefault(); return preferences(); }
+      if (kl === 'p' && !e.shiftKey) { e.preventDefault(); return printDialog(); }
       if (kl === 'e' && e.shiftKey) { e.preventDefault(); return PJ.Exporter.openDialog(targets(), e.altKey); }
       if (kl === 'i' && e.shiftKey) { e.preventDefault(); return app.importFiles(); }
       if (kl === 'u' && e.shiftKey) { e.preventDefault(); return dev ? develop.autoTone() : autoToneSelection(); }
@@ -905,6 +1058,9 @@
     rotateLeft: () => rotate(-90), rotateRight: () => rotate(90), flipH: () => flip('h'), flipV: () => flip('v'),
     autoTone: () => module === 'develop' ? develop.autoTone() : autoToneSelection(),
     lensProfile: lensProfileSelection,
+    compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack,
+    toggleStack: () => { const p = activePhoto(); if (p && p.stack) library.toggleStack(p.stack); else UI.toast('This photo isn\'t in a stack', 'circle-info'); },
+    print: printDialog,
     reset: () => module === 'develop' ? develop.resetAll() : resetSelection(),
     library: () => { if (library.view.mode === 'map') { library.view.mode = 'grid'; Cat.setPref('lib.mode', 'grid'); } setModule('library'); },
     develop: () => setModule('develop'), map: () => setModule('map'), duplicates: () => PJ.Dupes.open(app),
@@ -942,7 +1098,7 @@
     openDevelop, photoMenu, selectIds, setRating, setFlag, setLabel, rotate, flip, removePhotos, copySettings, pasteSettings, syncSettings,
     refreshPhotos, refreshView, autoGradeSelection, gradeLookMenu, xmpRead, xmpWrite, preferences,
     applyPresetToSelection, autoToneSelection, resetSelection, slideshow, setModule, runCommand, back, toggleDrawer,
-    exportSelected: () => PJ.Exporter.openDialog(targets())
+    compareView, printSheet, exportSelected: () => PJ.Exporter.openDialog(targets())
   });
 
   async function boot() {
