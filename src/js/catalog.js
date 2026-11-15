@@ -286,8 +286,10 @@
   }
 
   /* ---------------- Collections ---------------- */
-  function addCollection(name, ids) {
+  /** A collection lists its photos; a smart collection has a rule instead and finds them each time. */
+  function addCollection(name, ids, rule) {
     const c = { id: uid('col_'), name, photoIds: [...new Set(ids || [])] };
+    if (rule) c.rule = rule;
     state.collections.push(c);
     scheduleSave(); events.emit('collections');
     return c;
@@ -298,7 +300,7 @@
   }
   function addToCollection(id, ids) {
     const c = state.collections.find(x => x.id === id);
-    if (!c) return;
+    if (!c || c.rule) return;
     c.photoIds = [...new Set([...c.photoIds, ...ids])];
     scheduleSave(); events.emit('collections');
   }

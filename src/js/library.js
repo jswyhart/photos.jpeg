@@ -26,6 +26,8 @@
       geoIds: null                          // "Show in grid" from the map
     };
 
+    const sceneSeen = new Map();             // photo id → what the scene model saw (this session)
+
     /* ---------------- visible list ---------------- */
     let lastImportIds = new Set(Cat.pref('lib.lastImport', []));
     function sourceList() {
@@ -42,14 +44,15 @@
       if (s.startsWith('col:')) {
         const c = Cat.state.collections.find(x => x.id === s.slice(4));
         if (!c) return [];
+        if (c.rule) return applyFilters(all, c.rule);
         const set = new Set(c.photoIds);
         return all.filter(p => set.has(p.id));
       }
       return all;
     }
-    function visible() {
-      let list = sourceList();
-      const t = view.text.trim().toLowerCase();
+    /** The photos of a list that pass a set of filters: the filter bar's, or a smart collection's rule. */
+    function applyFilters(list, view) {
+      const t = (view.text || '').trim().toLowerCase();
       if (t) list = list.filter(p => [p.name, p.title, p.caption, (p.keywords || []).join(' '), p.exif && p.exif.model, p.exif && p.exif.lens, p.folder].join(' ').toLowerCase().includes(t));
       if (view.flag === 'picks') list = list.filter(p => p.flag === 1);
       else if (view.flag === 'unflagged') list = list.filter(p => !p.flag);
@@ -65,6 +68,15 @@
       if (view.edited === 'edited') list = list.filter(p => p.edited);
       else if (view.edited === 'unedited') list = list.filter(p => !p.edited);
       if (view.geoIds) list = list.filter(p => view.geoIds.has(p.id));
+      // only smart collections have these
+      if (view.keyword) { const k = view.keyword.trim().toLowerCase(); list = list.filter(p => (p.keywords || []).some(x => x.toLowerCase() === k)); }
+      if (view.camera) { const k = view.camera.trim().toLowerCase(); list = list.filter(p => p.exif && [p.exif.make, p.exif.model, p.exif.lens].join(' ').toLowerCase().includes(k)); }
+      if (view.days > 0) { const since = new Date(Date.now() - view.days * 864e5).toISOString(); list = list.filter(p => (p.captureTime || p.importedAt || '') >= since); }
+      if (view.isoMin > 0) list = list.filter(p => p.exif && +p.exif.iso >= view.isoMin);
+      return list;
+    }
+    function visible() {
+      let list = applyFilters(sourceList(), view);
       const key = {
         capture: p => p.captureTime || p.importedAt || '',
         import: p => p.importedAt || '',
@@ -114,7 +126,9 @@
     const colList = h('div', { class: 'list' });
     const colPanel = UI.panel({
       id: 'l-collections', title: 'Collections',
-      actions: h('span', { class: 'panel-actions' }, h('button', { title: 'New collection from selection', onclick: (e) => { e.stopPropagation(); newCollection(); } }, icon('plus')))
+      actions: h('span', { class: 'panel-actions' },
+        h('button', { title: 'New smart collection: a saved search that fills itself', onclick: (e) => { e.stopPropagation(); editSmart(null); } }, icon('wand-magic-sparkles')),
+        h('button', { title: 'New collection from selection', onclick: (e) => { e.stopPropagation(); newCollection(); } }, icon('plus')))
     });
     colPanel.body.style.padding = '4px 0 8px';
     colPanel.body.appendChild(colList);
@@ -169,6 +183,21 @@
       colList.innerHTML = '';
       if (!Cat.state.collections.length) colList.appendChild(h('div', { class: 'empty-note' }, 'Select photos and click + to create a collection.'));
       Cat.state.collections.forEach(c => {
+        if (c.rule) {
+          const li = srcItem('col:' + c.id, 'wand-magic-sparkles', c.name, applyFilters(Cat.state.photos, c.rule).length);
+          li.title = c.name + ' — ' + describeRule(c.rule);
+          li.addEventListener('dblclick', () => editSmart(c));
+          li.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            UI.menu(e.clientX, e.clientY, [
+              { label: 'Edit rule…', icon: 'sliders', action: () => editSmart(c) },
+              { label: 'Rename…', icon: 'pen', action: async () => { const n = await UI.prompt('Rename collection', c.name); if (n) { c.name = n; Cat.scheduleSave(); renderLeft(); } } },
+              { label: 'Delete collection', icon: 'trash-can', action: () => { Cat.removeCollection(c.id); if (view.source === 'col:' + c.id) setSource('all'); } }
+            ]);
+          });
+          colList.appendChild(li);
+          return;
+        }
         const clear = async () => {
           if (!c.photoIds.length) return UI.toast(`“${c.name}” is already empty`, 'circle-info');
           if (!await UI.confirm('Clear collection', `Remove all ${c.photoIds.length} item(s) from “${c.name}”? The collection stays, and the photos stay in your catalog.`, 'Clear', true)) return;
@@ -199,6 +228,53 @@
           e.preventDefault(); e.stopPropagation();
         });
         colList.appendChild(li);
+      });
+    }
+    /** A rule in words, for the tooltip. */
+    function describeRule(r) {
+      const out = [];
+      if (r.text) out.push(`contains “${r.text}”`);
+      if (r.keyword) out.push(`keyword “${r.keyword}”`);
+      if (r.camera) out.push(`camera or lens “${r.camera}”`);
+      if (r.minRating) out.push(`${r.minRating} stars or more`);
+      if (r.flag && r.flag !== 'all') out.push({ picks: 'picks', unflagged: 'unflagged', rejected: 'rejected', notrejected: 'not rejected' }[r.flag]);
+      if (r.label) out.push(r.label === 'none' ? 'no label' : r.label + ' label');
+      if (r.kind && r.kind !== 'all') out.push({ raw: 'RAW', nonraw: 'non-RAW', vc: 'virtual copies', photos: 'photos', videos: 'videos' }[r.kind]);
+      if (r.edited && r.edited !== 'all') out.push(r.edited);
+      if (r.days > 0) out.push(`from the last ${r.days} days`);
+      if (r.isoMin > 0) out.push(`ISO ${r.isoMin} or higher`);
+      return out.length ? out.join(', ') : 'every photo';
+    }
+    /** Make or change a smart collection. A new one starts from what the filter bar shows now. */
+    function editSmart(c) {
+      const r = Object.assign({ text: '', keyword: '', camera: '', minRating: 0, flag: 'all', label: '', kind: 'all', edited: 'all', days: 0, isoMin: 0 },
+        c ? c.rule : { text: view.text, minRating: view.minRating, flag: view.flag, label: view.label, kind: view.kind, edited: view.edited });
+      const txt = (v, ph) => { const i = h('input', { type: 'text', value: v || '', placeholder: ph || '', style: { width: '100%' } }); i.addEventListener('keydown', e => e.stopPropagation()); return i; };
+      const pick = (v, opts) => { const s = h('select', { style: { width: '100%' } }, opts.map(([k, l]) => h('option', { value: k }, l))); s.value = String(v); return s; };
+      const name = txt(c ? c.name : '', 'Name'), text = txt(r.text, 'in name, title, caption, keywords, camera, folder'), keyword = txt(r.keyword, 'exactly this keyword'), camera = txt(r.camera, 'e.g. Nikon, 50mm');
+      const rating = pick(r.minRating, [0, 1, 2, 3, 4, 5].map(n => [n, n ? `${'★'.repeat(n)} or more` : 'Any']));
+      const flag = pick(r.flag, [['all', 'Any'], ['picks', 'Picks'], ['unflagged', 'Unflagged'], ['notrejected', 'Not rejected'], ['rejected', 'Rejected']]);
+      const label = pick(r.label, [['', 'Any'], ...LABELS.map(l => [l, l[0].toUpperCase() + l.slice(1)]), ['none', 'No label']]);
+      const kind = pick(r.kind, [['all', 'Any'], ['photos', 'Photos'], ['videos', 'Videos'], ['raw', 'RAW'], ['nonraw', 'Non-RAW'], ['vc', 'Virtual copies']]);
+      const edited = pick(r.edited, [['all', 'Either'], ['edited', 'Edited'], ['unedited', 'Not edited']]);
+      const days = pick(r.days, [[0, 'Any time'], [7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days'], [365, 'Last year']]);
+      const iso = pick(r.isoMin, [[0, 'Any'], [800, '800 or higher'], [1600, '1600 or higher'], [3200, '3200 or higher'], [6400, '6400 or higher']]);
+      const count = h('div', { class: 'muted', style: { marginTop: '8px' } });
+      const read = () => ({ text: text.value.trim(), keyword: keyword.value.trim(), camera: camera.value.trim(), minRating: +rating.value, flag: flag.value, label: label.value, kind: kind.value, edited: edited.value, days: +days.value, isoMin: +iso.value });
+      const tally = () => { count.textContent = `${applyFilters(Cat.state.photos, read()).length} of ${Cat.state.photos.length} photos match now. The collection keeps itself up to date.`; };
+      const f = (l, el) => h('label', { class: 'field' }, h('span', null, l), el);
+      const body = h('div', { style: { width: '380px' } }, f('Name', name), f('Text', text), f('Keyword', keyword), f('Camera / lens', camera),
+        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' } }, f('Rating', rating), f('Flag', flag), f('Label', label), f('Kind', kind), f('Edited', edited), f('Captured', days), f('ISO', iso)), count);
+      body.addEventListener('input', tally); body.addEventListener('change', tally); tally();
+      UI.modal({
+        title: c ? 'Smart Collection' : 'New Smart Collection', icon: 'wand-magic-sparkles', body,
+        buttons: [{ label: 'Cancel' }, {
+          label: c ? 'Save' : 'Create', primary: true, onClick: () => {
+            const rule = read(), nm = name.value.trim() || describeRule(rule);
+            if (c) { c.rule = rule; c.name = nm; Cat.scheduleSave(); renderLeft(); if (view.source === 'col:' + c.id) app.refresh(); }
+            else { const n = Cat.addCollection(nm, [], rule); setSource('col:' + n.id); }
+          }
+        }]
       });
     }
     async function newCollection() {
@@ -536,7 +612,43 @@
         s.addEventListener('click', () => { targets.forEach(t => { t.keywords = [...new Set([...(t.keywords || []), k])]; }); Cat.setMeta(targets, {}); renderRight(); });
         return s;
       }));
-      kwPanel.body.append(multi ? h('div', { class: 'muted', style: { marginBottom: '6px' } }, `Editing ${targets.length} photos — showing shared keywords`) : null, chips, kwIn, allKw.size ? h('div', { class: 'section-title' }, 'Suggestions') : null, sugg);
+      // what the scene model sees in the photo(s): offered, never added by itself
+      const seen = h('div', { class: 'kw-chips', style: { marginTop: '6px' } });
+      const showSeen = () => {
+        const tally = new Map();
+        for (const t of targets) for (const d of (sceneSeen.get(t.id) || [])) tally.set(d.label, (tally.get(d.label) || 0) + 1);
+        const labels = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).filter(k => !common.has(k));
+        seen.replaceChildren(...labels.map((k) => {
+          const s = h('span', { style: { cursor: 'pointer', paddingRight: '8px' }, title: multi ? `Seen in ${tally.get(k)} of ${targets.length} photos — click to add to those` : 'Click to add' }, '+ ' + k);
+          s.addEventListener('click', () => {
+            const to = targets.filter(t => (sceneSeen.get(t.id) || []).some(d => d.label === k));
+            to.forEach(t => { t.keywords = [...new Set([...(t.keywords || []), k])]; });
+            Cat.setMeta(to, {}); renderRight();
+          });
+          return s;
+        }));
+        if (!labels.length && targets.every(t => sceneSeen.has(t.id))) seen.appendChild(h('span', { class: 'muted', style: { background: 'none' } }, 'Nothing more to suggest'));
+      };
+      const canSee = PJ.AIMask && targets.some(t => t.kind !== 'video' && !t.missing);
+      const seeBtn = canSee ? h('button', {
+        class: 'btn sm', title: 'Look at the photo with the scene model (on this computer) and offer what it shows as keywords',
+        onclick: async () => {
+          const todo = targets.filter(t => t.kind !== 'video' && !t.missing && !sceneSeen.has(t.id)).slice(0, 200);
+          seeBtn.disabled = true;
+          let n = 0;
+          for (const t of todo) {
+            UI.activity(`Looking at ${t.name}…`, ++n / (todo.length + 1));
+            try { sceneSeen.set(t.id, await PJ.AIMask.describe(t)); }
+            catch (e) { console.warn('keyword suggestions:', t.name, e && e.message); sceneSeen.set(t.id, []); }
+          }
+          UI.activity('');
+          if (seeBtn.isConnected) { seeBtn.disabled = false; showSeen(); }
+        }
+      }, icon('wand-magic-sparkles'), 'Suggest from the photo') : null;
+      if (targets.some(t => sceneSeen.has(t.id))) showSeen();
+      kwPanel.body.append(multi ? h('div', { class: 'muted', style: { marginBottom: '6px' } }, `Editing ${targets.length} photos — showing shared keywords`) : null, chips, kwIn,
+        seeBtn ? h('div', { class: 'row', style: { marginTop: '8px' } }, seeBtn) : null, seen,
+        allKw.size ? h('div', { class: 'section-title' }, 'Used before') : null, sugg);
     }
 
     function empty() {

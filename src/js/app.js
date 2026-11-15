@@ -565,14 +565,100 @@
     const cols = list.length <= 3 ? list.length : list.length === 4 ? 2 : 3;
     const grid = h('div', { class: 'grid', style: { gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${Math.ceil(list.length / cols)}, 1fr)` } });
     const panes = list.map((p, i) => {
-      const cv = h('canvas'), cap = h('div', { class: 'cap' });
-      const pane = h('div', { class: 'pane', onclick: () => { focus = i; paint(); } }, cv, cap);
+      const cv = h('canvas'), cap = h('div', { class: 'cap' }), box = h('div', { class: 'img' }, cv);
+      const pane = h('div', { class: 'pane', onclick: () => { if (!moved) { focus = i; paint(); } } }, box, cap);
       grid.appendChild(pane);
-      return { p, cv, cap, pane };
+      return { p, cv, cap, pane, box, sharp: null, detail: false };
     });
+    /* Zoom and pan, the same in every pane: the point of comparing is the same spot side by side.
+       z = 1 fits the photo; (cx, cy) is the middle of the view, as a share of the photo. */
+    const zs = { z: 1, cx: 0.5, cy: 0.5 };
+    let moved = false, detailTimer = 0;
+    const fitOf = (q) => { const r = q.box.getBoundingClientRect(); return Math.min(r.width / q.cv.width, r.height / q.cv.height) || 1; };
+    const place = () => {
+      zs.z = Math.max(1, Math.min(32, zs.z));
+      const half = 0.5 / zs.z;
+      zs.cx = Math.max(half, Math.min(1 - half, zs.cx)); zs.cy = Math.max(half, Math.min(1 - half, zs.cy));
+      for (const q of panes) {
+        const r = q.box.getBoundingClientRect(), f = fitOf(q), w = q.cv.width * f, hh = q.cv.height * f;
+        // the canvas is drawn fitted and centred; then scaled about the box's middle and shifted
+        q.cv.style.transform = `translate(${(0.5 - zs.cx) * w * zs.z}px, ${(0.5 - zs.cy) * hh * zs.z}px) scale(${zs.z})`;
+        q.cv.style.imageRendering = zs.z * f * (q.detail ? q.detailScale : 1) > 2.5 ? 'pixelated' : '';
+        void r;
+      }
+      zoomNote.textContent = zs.z > 1.001 ? `${zs.z.toFixed(1)}× · double-click to fit` : 'wheel to zoom · drag to pan';
+      if (zs.z > 1.5) { clearTimeout(detailTimer); detailTimer = setTimeout(moreDetail, 250); }
+    };
+    /** Zoomed in: swap the fitted previews for full-size renders, one pane at a time. */
+    const moreDetail = async () => {
+      for (const q of panes) {
+        if (q.detail || q.p.kind === 'video' || !root.isConnected) continue;
+        q.detail = true;
+        try {
+          const res = await E.renderFull(q.p, P.clone(q.p.settings));
+          if (!res || !root.isConnected) return;
+          const img = E.toCanvas(res), cap = panes.length <= 2 ? 6000 : 4096, k = Math.min(1, cap / Math.max(img.width, img.height));
+          q.detailScale = q.cv.width / (img.width * k);
+          q.cv.width = Math.round(img.width * k); q.cv.height = Math.round(img.height * k);
+          const cx = q.cv.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(img, 0, 0, q.cv.width, q.cv.height);
+          place();
+        } catch (e) { q.detail = false; console.warn('compare: full-size render failed for', q.p.name, e && e.message); return; }
+      }
+    };
+    grid.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const q = panes.find(x => x.pane.contains(e.target)) || panes[focus];
+      const r = q.box.getBoundingClientRect(), f = fitOf(q), w = q.cv.width * f, hh = q.cv.height * f;
+      // the photo point under the pointer stays under the pointer
+      const px = zs.cx + (e.clientX - (r.left + r.width / 2)) / (w * zs.z), py = zs.cy + (e.clientY - (r.top + r.height / 2)) / (hh * zs.z);
+      const z = Math.max(1, Math.min(32, zs.z * Math.exp(-e.deltaY * 0.0016)));
+      zs.cx = px - (e.clientX - (r.left + r.width / 2)) / (w * z); zs.cy = py - (e.clientY - (r.top + r.height / 2)) / (hh * z); zs.z = z;
+      place();
+    }, { passive: false });
+    grid.addEventListener('pointerdown', (e) => {
+      const q = panes.find(x => x.box.contains(e.target));
+      moved = false;
+      if (!q || e.button !== 0 || zs.z <= 1.001) return;
+      const f = fitOf(q), w = q.cv.width * f, hh = q.cv.height * f, x0 = e.clientX, y0 = e.clientY, c0 = [zs.cx, zs.cy];
+      const move = (ev) => {
+        if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) > 3) moved = true;
+        zs.cx = c0[0] - (ev.clientX - x0) / (w * zs.z); zs.cy = c0[1] - (ev.clientY - y0) / (hh * zs.z); place();
+      };
+      const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    });
+    grid.addEventListener('dblclick', (e) => {
+      const q = panes.find(x => x.box.contains(e.target));
+      if (!q) return;
+      if (zs.z > 1.001) { zs.z = 1; zs.cx = zs.cy = 0.5; }
+      else {
+        const r = q.box.getBoundingClientRect(), f = fitOf(q), w = q.cv.width * f, hh = q.cv.height * f;
+        zs.cx = 0.5 + (e.clientX - (r.left + r.width / 2)) / w; zs.cy = 0.5 + (e.clientY - (r.top + r.height / 2)) / hh;
+        zs.z = Math.max(2, (q.p.width || q.cv.width) / w / (window.devicePixelRatio || 1));     // one photo pixel per screen pixel
+      }
+      place();
+    });
+    const zoomNote = h('span', { class: 'muted' });
+    /** How sharp the sharpest part of a picture is: detail energy in its crispest tenth (blurred backgrounds do not count against it). */
+    const sharpness = (res) => {
+      const w = res.width, hh = res.height, d = res.data, bw = Math.max(8, Math.floor(w / 16)), bh = Math.max(8, Math.floor(hh / 16));
+      const cols = Math.floor(w / bw), rows = Math.floor(hh / bh), blocks = new Float64Array(cols * rows);
+      const L = (x, y) => { const i = (y * w + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
+      for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
+        let sum = 0, n = 0;
+        for (let y = Math.max(1, by * bh); y < Math.min(hh - 1, (by + 1) * bh); y += 2) for (let x = Math.max(1, bx * bw); x < Math.min(w - 1, (bx + 1) * bw); x += 2) {
+          const v = 4 * L(x, y) - L(x - 1, y) - L(x + 1, y) - L(x, y - 1) - L(x, y + 1); sum += v * v; n++;
+        }
+        blocks[by * cols + bx] = n ? sum / n : 0;
+      }
+      const top = Array.from(blocks).sort((a, b) => b - a).slice(0, Math.max(1, Math.round(blocks.length * 0.1)));
+      return Math.sqrt(top.reduce((a, b) => a + b, 0) / top.length);
+    };
+    const best = () => Math.max(1e-9, ...panes.map(q => q.sharp || 0));
     const paint = () => panes.forEach((q, i) => {
       q.pane.className = `pane${i === focus ? ' on' : ''}${q.p.flag === -1 ? ' rejected' : ''}`;
       q.cap.replaceChildren(h('span', { class: 'name' }, `${i + 1}  ${Cat.displayName(q.p)}`),
+        q.sharp != null ? h('span', { class: `sharp${q.sharp === best() ? ' best' : ''}`, title: 'How sharp the crispest part of this photo is, against the sharpest of the ones compared (100)' }, `sharpness ${Math.round(q.sharp / best() * 100)}`) : null,
         q.p.flag === 1 ? icon('flag', 'flag-pick') : q.p.flag === -1 ? icon('ban', 'flag-reject') : null,
         h('span', { class: 'stars' }, '★'.repeat(q.p.rating || 0) + '☆'.repeat(5 - (q.p.rating || 0))));
     });
@@ -582,9 +668,12 @@
         try {
           const res = await E.render(q.p, P.clone(q.p.settings), 'proxy', {}, want === 'any' ? 0 : 1, want);
           if (!res || !root.isConnected) return;
+          if (q.detail) return;                          // already replaced by the full-size render
           const img = E.toCanvas(res);
           q.cv.width = img.width; q.cv.height = img.height;
           q.cv.getContext('2d').drawImage(img, 0, 0);
+          if (want === 'best' || !E.needsDevelop(q.p)) { q.sharp = sharpness(res); paint(); }
+          place();
         } catch (e) { console.warn('compare: could not render', q.p.name, e && e.message); }
         if (!E.needsDevelop(q.p)) break;
       }
@@ -607,13 +696,13 @@
     const root = h('div', { class: 'compare' },
       h('div', { class: 'bar' }, h('b', null, `Compare ${list.length} photos`),
         h('span', { class: 'muted' }, '←/→ choose · 0–5 rate · P pick · X reject · U unflag · Enter open in Develop · Esc close'),
-        h('span', { style: { flex: 1 } }), h('button', { class: 'btn sm', onclick: close }, icon('xmark'), 'Close')),
+        h('span', { style: { flex: 1 } }), zoomNote, h('button', { class: 'btn sm', onclick: close }, icon('xmark'), 'Close')),
       grid);
     document.body.appendChild(root);
     window.addEventListener('keydown', onKey, true);
-    paint();
+    paint(); place();
     panes.forEach(draw);
-    return { close, panes };
+    return { close, panes, zoom: zs, place };
   }
 
   /* ---------------- stacks ---------------- */
