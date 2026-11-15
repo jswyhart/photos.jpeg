@@ -251,7 +251,7 @@
   uniform float uGrainA, uGrainCell, uGrainRough, uRs; uniform uint uSeed;
   uniform float uSharpAmt, uSharpLim, uSharpRad, uSharpMask;
   uniform float uNrLuma, uNrDetail, uNrColor;
-  uniform bool uClipHi, uClipLo; uniform int uOverlayMask;
+  uniform bool uClipHi, uClipLo; uniform int uOverlayMask; uniform bool uToP3;
   uniform vec2 uP1Size;
   out vec4 frag;
 
@@ -408,6 +408,8 @@
       float a = mw[uOverlayMask] * 0.55;
       c = mix(c, vec3(0.9, 0.118, 0.235), a);
     }
+    // an sRGB picture on a Display P3 canvas: the same colours, written in P3 numbers
+    if (uToP3) c = toSrgb(mat3(0.8224621, 0.0331941, 0.0170827, 0.1775380, 0.9668058, 0.0723974, 0.0, 0.0, 0.9105199) * toLin(c));
     frag = vec4(c, 1.0);
   }`;
 
@@ -426,11 +428,17 @@
 
   /* ---------------- renderer ---------------- */
   class Renderer {
-    constructor() {
+    /** opts.p3: the canvas holds Display P3 values for good (photo previews); otherwise sRGB (video). */
+    constructor(opts) {
       this.canvas = document.createElement('canvas');
       const gl = this.canvas.getContext('webgl2', { premultipliedAlpha: false, preserveDrawingBuffer: true, antialias: false, powerPreference: 'high-performance' });
       if (!gl) throw new Error('WebGL2 is not available — video grading needs a GPU-accelerated browser engine');
       this.gl = gl;
+      // Set once, before anything is drawn. Switching a canvas between sRGB and P3 as photos change does
+      // not take hold reliably (a frame can come out with the previous meaning), so a P3 canvas stays P3:
+      // a wide-colour photo is drawn as it is, anything else is converted to P3 at the end of pass 2.
+      this.p3 = !!(opts && opts.p3) && 'drawingBufferColorSpace' in gl;
+      if (this.p3) gl.drawingBufferColorSpace = 'display-p3';
       this.floatOk = !!gl.getExtension('EXT_color_buffer_float');
       gl.getExtension('OES_texture_float_linear');
       this.p1 = this.program(PASS1); this.p2 = this.program(PASS2);
@@ -699,11 +707,7 @@
       gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, useLog ? this.inLutTex : this.dummy); gl.uniform1i(pr.locs.uInLut, 5);
       this.bindCube(pr, s, opts, 12, 'input');
       const si = !useLog && opts.srcInput && opts.srcInput.lut ? opts.srcInput : null;
-      // what the numbers in the drawing buffer mean: Display P3 for a wide-colour photo, sRGB otherwise
-      if (opts.target === 'canvas' && 'drawingBufferColorSpace' in gl) {
-        const cs = si && si.space === 'p3' && opts.wide ? 'display-p3' : 'srgb';
-        if (gl.drawingBufferColorSpace !== cs) gl.drawingBufferColorSpace = cs;
-      }
+      this.wideNow = !!(si && si.space === 'p3' && opts.wide);       // this frame's numbers are Display P3 already
       gl.uniform1i(pr.locs.uSI, si ? 1 : 0);
       if (si) {
         const up = (tex, arr) => {
@@ -787,6 +791,7 @@
       const bind = (unit, tex, name) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex || this.dummy); gl.uniform1i(pr.locs[name], unit); };
       bind(0, f1.tex, 'uP1'); bind(1, yl, 'uYl'); bind(2, yt, 'uYt'); bind(3, dc, 'uDC');
       gl.uniform1i(pr.locs.uMaskColor, P.masksNeedColor(masks) ? 1 : 0);
+      gl.uniform1i(pr.locs.uToP3, this.p3 && !toPixels && !this.wideNow ? 1 : 0);
       gl.uniform3f(pr.locs.uUngain, Math.max(1e-4, gr * em), Math.max(1e-4, gg * em), Math.max(1e-4, gb * em));
       gl.uniform2f(pr.locs.uP1Size, outW, outH);
       gl.uniform1i(pr.locs.uHasYl, yl ? 1 : 0); gl.uniform1i(pr.locs.uHasYt, yt ? 1 : 0); gl.uniform1i(pr.locs.uHasDC, dc ? 1 : 0);

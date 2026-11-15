@@ -512,7 +512,7 @@
     if (gpuOff || !PJ.GL || !PJ.Catalog || PJ.Catalog.pref('gpu.preview', true) === false) return false;
     if (!gpu) {
       try {
-        gpu = new PJ.GL.Renderer();
+        gpu = new PJ.GL.Renderer({ p3: P3_CANVAS });
         // Software rasterisers render far slower than the worker pool
         const gl = gpu.gl, dbg = gl.getExtension('WEBGL_debug_renderer_info');
         const name = String(dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
@@ -584,7 +584,7 @@
       // The frame stays on the GPU: copying it into a plain canvas needs no readback, so live
       // drags can keep up with the display's refresh rate.
       const canvas = Dec.makeCanvas(r.width, r.height);
-      canvas.getContext('2d', wide ? { colorSpace: 'display-p3' } : undefined).drawImage(gpu.canvas, 0, 0);
+      canvas.getContext('2d', gpu.p3 ? { colorSpace: 'display-p3' } : undefined).drawImage(gpu.canvas, 0, 0);
       const stats = gpuStats(r, opts);
       const ms = performance.now() - t0;
       // A GPU slower than the workers (software GL, an overloaded laptop chip) isn't worth it
@@ -593,7 +593,7 @@
       return {
         canvas, width: r.width, height: r.height, fullWidth: r.fullWidth, fullHeight: r.fullHeight,
         region: { x: 0, y: 0, w: r.width, h: r.height }, hist: stats.hist, clip: stats.clip,
-        ms, level: 'proxy', gpu: true, space: wide ? 'p3' : 'srgb', levelWidth: lv.width, levelHeight: lv.height, fullW: src.fullW, fullH: src.fullH
+        ms, level: 'proxy', gpu: true, space: gpu.p3 ? 'p3' : 'srgb', wide, levelWidth: lv.width, levelHeight: lv.height, fullW: src.fullW, fullH: src.fullH
       };
     } catch (e) {
       console.warn('GPU preview failed; using the CPU from now on', e);
