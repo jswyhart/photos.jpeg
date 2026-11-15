@@ -361,3 +361,15 @@ tools/braw/        Blackmagic RAW helper source (build against the free SDK)
 ```
 
 The UI also runs in a plain browser (open `src/index.html` through any local web server) with an in-memory fallback for files, which is handy for development.
+
+## Licence
+
+photos.jpeg's own code is under the MIT licence (see `LICENSE`).
+
+Parts that come from elsewhere keep their own licences, each stated next to the files:
+
+- `src/vendor/ml` — ONNX Runtime Web (MIT) and the models: U²-Net (Apache 2.0), EfficientViT-Seg (Apache 2.0), YuNet (MIT), SFace (Apache 2.0)
+- `src/vendor/jxl` — the libjxl encoder from @jsquash/jxl (Apache 2.0; libjxl is BSD 3-Clause) and the jxl-oxide decoder (MIT or Apache 2.0)
+- `src/vendor/lensfun` — lens calibration data from the lensfun project, under CC BY-SA 3.0: the data file stays under that licence, not MIT
+- `src/vendor/fontawesome` — Font Awesome Free (icons CC BY 4.0, fonts SIL OFL 1.1, code MIT)
+- ffmpeg, when placed in `windows/tools` for video export, is a separate program under its own licence (LGPL or GPL, depending on the build)
