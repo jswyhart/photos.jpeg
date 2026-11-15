@@ -598,3 +598,13 @@ body.touch select, body.touch input[type="text"], body.touch input[type="search"
 .transport .kf-btn .kf-dia { display: inline-block; width: 9px; height: 9px; transform: rotate(45deg); border: 1.5px solid currentColor; border-radius: 1px; }
 .transport .kf-btn.has .kf-dia { border-color: #f0b03e; }
 .transport .kf-btn.on .kf-dia { background: #f0b03e; border-color: #f0b03e; }
+
+/* ---- people ---- */
+.face-groups { max-height: 66vh; overflow-y: auto; overflow-x: hidden; }
+.face-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--border); }
+.faces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+img.face { width: 56px; height: 56px; border-radius: 6px; cursor: pointer; object-fit: cover; }
+img.face.off { opacity: 0.25; outline: 1px dashed #888; }
+.face-name { display: flex; gap: 6px; align-items: center; flex: none; }
+.face-name input { width: 150px; }
+.wide-row { padding: 2px 0 6px; }

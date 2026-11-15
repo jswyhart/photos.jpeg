@@ -64,6 +64,18 @@
     });
   }
 
+  /** Run any model of vendor/ml in the models' thread: { model (a name to keep it loaded under), file, input, dims, all }. */
+  function runModel(job) {
+    return new Promise((resolve, reject) => {
+      const id = ++seq;
+      waiting.set(id, { resolve, reject });
+      modelWorker().postMessage(Object.assign({ id }, job), [job.input.buffer]);
+    }).catch((e) => {
+      const msg = String(e && e.message || e);
+      throw new Error(/404|Failed to fetch|no such file|failed to load model/i.test(msg) ? `A model this needs (${job.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The model could not be started: ' + msg);
+    });
+  }
+
   /* ---------------- image → network → probability ---------------- */
   /** RGBA pixels → a 1×3×n×n float tensor, stretched to the square the networks expect, ImageNet-normalised. */
   function toTensor(img, n) {
@@ -319,5 +331,5 @@
   const SCENE_LABELS = { 1: 'building', 2: 'sky', 4: 'tree', 6: 'road', 7: 'bed', 9: 'grass', 12: 'people', 13: 'earth', 16: 'mountain', 17: 'plant', 19: 'chair', 20: 'car', 21: 'water', 23: 'sofa', 25: 'house', 26: 'sea', 29: 'field', 32: 'fence', 34: 'rock', 46: 'sand', 48: 'skyscraper', 52: 'path', 53: 'stairs', 60: 'river', 61: 'bridge', 66: 'flower', 67: 'book', 68: 'hill', 72: 'palm tree', 76: 'boat', 80: 'bus', 83: 'truck', 84: 'tower', 90: 'airplane', 91: 'dirt track', 94: 'pole', 102: 'van', 103: 'ship', 104: 'fountain', 109: 'swimming pool', 113: 'waterfall', 114: 'tent', 116: 'motorbike', 126: 'animal', 127: 'bicycle', 128: 'lake', 136: 'traffic light', 149: 'flag' };
   const SMALL_THINGS = new Set([12, 20, 66, 76, 80, 83, 90, 102, 103, 116, 126, 127, 136, 149]);
 
-  global.PJ.AIMask = { KINDS, create, ensure, ready, describe, retarget, hasAi, _test: { compute, probability, refine } };
+  global.PJ.AIMask = { KINDS, runModel, create, ensure, ready, describe, retarget, hasAi, _test: { compute, probability, refine } };
 })(window);

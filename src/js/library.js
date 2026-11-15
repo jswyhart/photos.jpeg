@@ -41,6 +41,7 @@
       if (s === 'missing') return all.filter(p => p.missing);
       if (s === 'videos') return all.filter(p => p.kind === 'video');
       if (s.startsWith('folder:')) { const f = s.slice(7); return all.filter(p => (p.folder || '(none)') === f); }
+      if (s.startsWith('person:')) { const id = s.slice(7); return all.filter(p => (p.faces || []).some(f => f.p === id)); }
       if (s.startsWith('col:')) {
         const c = Cat.state.collections.find(x => x.id === s.slice(4));
         if (!c) return [];
@@ -53,7 +54,7 @@
     /** The photos of a list that pass a set of filters: the filter bar's, or a smart collection's rule. */
     function applyFilters(list, view) {
       const t = (view.text || '').trim().toLowerCase();
-      if (t) list = list.filter(p => [p.name, p.title, p.caption, (p.keywords || []).join(' '), p.exif && p.exif.model, p.exif && p.exif.lens, p.folder].join(' ').toLowerCase().includes(t));
+      if (t) list = list.filter(p => [p.name, p.title, p.caption, (p.keywords || []).join(' '), p.faces && PJ.Faces ? PJ.Faces.namesIn(p).join(' ') : '', p.exif && p.exif.model, p.exif && p.exif.lens, p.folder].join(' ').toLowerCase().includes(t));
       if (view.flag === 'picks') list = list.filter(p => p.flag === 1);
       else if (view.flag === 'unflagged') list = list.filter(p => !p.flag);
       else if (view.flag === 'rejected') list = list.filter(p => p.flag === -1);
@@ -132,7 +133,100 @@
     });
     colPanel.body.style.padding = '4px 0 8px';
     colPanel.body.appendChild(colList);
-    left.append(catPanel.el, folderPanel.el, colPanel.el);
+    const peopleList = h('div', { class: 'list' });
+    const peoplePanel = UI.panel({
+      id: 'l-people', title: 'People',
+      actions: h('span', { class: 'panel-actions' },
+        h('button', { title: 'Find faces in the photos shown (on this computer; nothing is uploaded)', onclick: (e) => { e.stopPropagation(); findFaces(); } }, icon('magnifying-glass')))
+    });
+    peoplePanel.body.style.padding = '4px 0 8px';
+    peoplePanel.body.appendChild(peopleList);
+    left.append(catPanel.el, folderPanel.el, colPanel.el, peoplePanel.el);
+
+    /* ---------------- people ---------------- */
+    let faceScan = null;
+    async function findFaces() {
+      const F = PJ.Faces;
+      if (!F) return;
+      if (faceScan) { faceScan.stop = true; return; }
+      const list = (app.visiblePhotos ? app.visiblePhotos() : sourceList()).filter(p => F.canScan(p) && !F.scanned(p));
+      if (!list.length) { if (F.unnamedCount()) nameFaces(); else UI.toast('Every photo shown has been looked through already', 'circle-info'); return; }
+      faceScan = { stop: false };
+      let r;
+      try { r = await F.scan(list, (i, n, p) => UI.activity(`Looking for faces · ${i + 1} of ${n} · ${p.name} (click the magnifier again to stop)`, i / n), faceScan); }
+      finally { faceScan = null; UI.activity('', 0); }
+      renderLeft();
+      if (r.error) return UI.toast(r.error, 'triangle-exclamation');
+      UI.toast(`${r.faces} face${r.faces === 1 ? '' : 's'} found in ${r.photos} photo${r.photos === 1 ? '' : 's'}${r.failed ? ` · ${r.failed} could not be read` : ''}`, 'user');
+      if (F.unnamedCount()) nameFaces();
+    }
+    const faceImg = (e, onClick) => {
+      const im = h('img', { class: 'face', src: PJ.Faces.faceUrl(e.face), title: e.photo.name, draggable: false });
+      if (onClick) im.addEventListener('click', () => onClick(im));
+      return im;
+    };
+    /** The faces without a name, one row per person the app thinks they are; a name given to a row names all its faces. */
+    function nameFaces() {
+      const F = PJ.Faces;
+      const body = h('div', { class: 'face-groups' });
+      const names = h('datalist', { id: 'people-names' });
+      const fill = () => {
+        names.replaceChildren(...F.people().map(p => h('option', { value: p.name })));
+        const gs = F.groups();
+        body.replaceChildren(names);
+        if (!gs.length) { body.append(h('p', { class: 'muted' }, 'No faces are waiting for a name.')); return; }
+        body.append(h('p', { class: 'muted small' }, 'Each row is one person as far as the app can tell. Click a face to leave it out of the row, then type a name. Rows with one face are usually faces seen at an odd angle.'));
+        for (const g of gs.slice(0, 60)) {
+          const off = new Set();
+          const inp = h('input', { type: 'text', placeholder: 'Name', list: 'people-names', value: g.suggest ? g.suggest.name : '' });
+          const chosen = () => g.faces.filter(e => !off.has(e));
+          const save = () => { if (!inp.value.trim()) return inp.focus(); F.name(chosen(), inp.value); fill(); renderLeft(); };
+          inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); ev.stopPropagation(); });
+          body.append(h('div', { class: 'face-row' },
+            h('div', { class: 'faces' }, ...g.faces.slice(0, 24).map(e => faceImg(e, (im) => { if (off.has(e)) off.delete(e); else off.add(e); im.classList.toggle('off', off.has(e)); })),
+              g.faces.length > 24 ? h('span', { class: 'muted small' }, `+${g.faces.length - 24}`) : null),
+            h('div', { class: 'face-name' }, inp,
+              h('button', { class: 'btn primary', onclick: save }, g.suggest ? 'Yes, ' + g.suggest.name : 'Name'),
+              h('button', { class: 'btn', title: 'These are not people you want to keep track of', onclick: () => { F.ignore(chosen()); fill(); renderLeft(); } }, 'Ignore'))));
+        }
+        if (gs.length > 60) body.append(h('p', { class: 'muted small' }, `${gs.length - 60} more rows appear as these are named.`));
+      };
+      fill();
+      UI.modal({ title: 'Who is this?', icon: 'user', wide: true, body, buttons: [{ label: 'Done', primary: true }] });
+    }
+    /** The faces filed under a person; a click takes a face out again. */
+    function personFaces(who) {
+      const F = PJ.Faces, body = h('div', { class: 'face-groups' });
+      const fill = () => {
+        const fs = F.facesOf(who.id);
+        body.replaceChildren(h('p', { class: 'muted small' }, 'Click a face that is not ' + who.name + ' to take it out; it goes back to the faces without a name.'),
+          h('div', { class: 'faces' }, ...fs.map(e => faceImg(e, () => { F.unname([e]); fill(); renderLeft(); }))));
+      };
+      fill();
+      UI.modal({ title: who.name, icon: 'user', wide: true, body, buttons: [{ label: 'Done', primary: true }] });
+    }
+    function renderPeople() {
+      const F = PJ.Faces;
+      if (!F) { peoplePanel.el.style.display = 'none'; return; }
+      const rows = [];
+      for (const who of F.people().slice().sort((a, b) => a.name.localeCompare(b.name))) {
+        const key = 'person:' + who.id, li = srcItem(key, 'user', who.name, F.photosOf(who.id).length);
+        li.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          UI.menu(e.clientX, e.clientY, [
+            { label: 'Show faces…', icon: 'user', action: () => personFaces(who) },
+            { label: 'Rename…', icon: 'pen', action: async () => { const n = await UI.prompt('Rename person', who.name); if (n) { F.rename(who.id, n); if (!F.person(who.id) && view.source === key) setSource('all'); else renderLeft(); } } },
+            { label: 'Remove this person', icon: 'trash-can', action: () => { F.remove(who.id); if (view.source === key) setSource('all'); else renderLeft(); } }
+          ]);
+        });
+        rows.push(li);
+      }
+      const n = F.unnamedCount();
+      if (n) { const li = h('div', { class: 'li', title: 'Faces that have not been given a name' }, icon('circle-question'), h('span', { class: 't' }, 'Faces without a name'), h('span', { class: 'n' }, n)); li.addEventListener('click', nameFaces); rows.push(li); }
+      if (!rows.length) rows.push(h('div', { class: 'muted small', style: { padding: '2px 12px' } }, 'Click the magnifier to find the faces in the photos shown.'));
+      peopleList.replaceChildren(...rows);
+    }
+    Cat.events.on('people', () => renderLeft());
 
     /** Small inline action buttons shown on hover / for the active source. */
     function acts(list) {
@@ -149,6 +243,7 @@
       return li;
     }
     function renderLeft() {
+      renderPeople();
       const all = Cat.state.photos;
       catalogList.replaceChildren(
         srcItem('all', 'images', 'All Photographs', all.length),

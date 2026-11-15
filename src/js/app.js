@@ -712,6 +712,7 @@
     const masksOf = (s) => { if (s && s.masks) for (const m of s.masks) if (m.map && m.map.id) keep.add('mm_' + m.map.id); };
     for (const p of Cat.state.photos) {
       keep.add(p.id);
+      for (const f of p.faces || []) if (f.t) keep.add(f.t);
       masksOf(p.settings);
       for (const e of p.history || []) masksOf(e.settings);
       for (const e of p.snapshots || []) masksOf(e.settings);

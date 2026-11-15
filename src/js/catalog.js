@@ -96,6 +96,7 @@
     userPresets: [],
     exportPresets: [],
     luts: [],
+    people: [],          // named people (faces.js): [{ id, name }]
     prefs: {},
     loaded: false
   };
@@ -142,6 +143,7 @@
       userPresets: state.userPresets,
       exportPresets: state.exportPresets,
       luts: state.luts,
+      people: state.people,
       prefs: state.prefs
     };
   }
@@ -168,6 +170,7 @@
       state.userPresets = data.userPresets || [];
       state.exportPresets = data.exportPresets || [];
       state.luts = data.luts || [];
+      state.people = data.people || [];
       state.prefs = data.prefs || {};
       if (!PJ.API.isDesktop) state.photos.forEach(p => { p.missing = true; });
     }
