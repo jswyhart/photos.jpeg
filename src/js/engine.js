@@ -373,7 +373,7 @@
       const px = cap ? P.resizePixels(dec.pixels, cap) : dec.pixels;
       return { data: P.SHARED && !P.isShared(px.data) ? P.copyPixels(px.data) : px.data, width: px.width, height: px.height };
     }
-    return toWorkingPixels(Dec.toImageData(dec.image, capEdge(dec.width, dec.height)));
+    return toWorkingPixels(Dec.toImageData(dec.image, capEdge(dec.width, dec.height), dec.input && !dec.input.lut ? dec.input.space : undefined));
   }
   /** ImageData → plain pixels, in shared memory when the page is cross-origin isolated. */
   function toWorkingPixels(img) {
@@ -492,7 +492,7 @@
     const clip = { hi: 0, lo: 0 };
     for (const p of parts) {
       for (const c of ['r', 'g', 'b', 'l']) for (let i = 0; i < 256; i++) hist[c][i] += p.hist[c][i];
-      clip.hi += p.clip.hi; clip.lo += p.clip.lo;
+      clip.hi += p.clip.hi; clip.lo += p.clip.lo; clip.out = (clip.out || 0) + (p.clip.out || 0);
     }
     return {
       data, data16, width: W, height: H, fullWidth: parts[0].fullWidth, fullHeight: parts[0].fullHeight,
@@ -579,7 +579,7 @@
       if (src.input) { o.srcInput = src.input; o.wide = !!photo.wide; }
       if (s.lut.id && PJ.LUTs) { o.cube = PJ.LUTs.getSync(s.lut.id); if (!o.cube) { PJ.LUTs.get(s.lut.id); return null; } }
       const wide = P.isWide(s, o);
-      if (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0))) return null;   // a look in wide colour, or no P3 canvas: the CPU render does it
+      if (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0) || o.gamutWarn)) return null;   // a look in wide colour, or no P3 canvas: the CPU render does it
       const r = gpu.render(s, o);
       // The frame stays on the GPU: copying it into a plain canvas needs no readback, so live
       // drags can keep up with the display's refresh rate.
@@ -723,7 +723,7 @@
     const d = src.draft.data;
     let r = 0, g = 0, b = 0, n = 0;
     for (let i = 0; i < d.length; i += 16) {
-      const [R, G, B] = src.input ? PJ.Raw.sourceLinear(src.input, d[i], d[i + 1], d[i + 2]) : [P.SRGB8_TO_LIN[d[i]], P.SRGB8_TO_LIN[d[i + 1]], P.SRGB8_TO_LIN[d[i + 2]]];
+      const [R, G, B] = src.input && src.input.lut ? PJ.Raw.sourceLinear(src.input, d[i], d[i + 1], d[i + 2]) : [P.SRGB8_TO_LIN[d[i]], P.SRGB8_TO_LIN[d[i + 1]], P.SRGB8_TO_LIN[d[i + 2]]];
       const y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
       if (y < 0.02 || y > 0.9) continue; // skip extremes
       r += R; g += G; b += B; n++;
@@ -746,7 +746,7 @@
       const x = Math.floor(p[0]), y = Math.floor(p[1]);
       if (x < 0 || y < 0 || x >= lv.width || y >= lv.height) continue;
       const i = (y * lv.width + x) * 4;
-      if (src.input) { const c = PJ.Raw.sourceLinear(src.input, lv.data[i], lv.data[i + 1], lv.data[i + 2]); R += c[0]; G += c[1]; B += c[2]; }
+      if (src.input && src.input.lut) { const c = PJ.Raw.sourceLinear(src.input, lv.data[i], lv.data[i + 1], lv.data[i + 2]); R += c[0]; G += c[1]; B += c[2]; }
       else { R += P.SRGB8_TO_LIN[lv.data[i]]; G += P.SRGB8_TO_LIN[lv.data[i + 1]]; B += P.SRGB8_TO_LIN[lv.data[i + 2]]; }
       n++;
     }

@@ -43,6 +43,7 @@
       // crop
       crop: null,         // {rect, aspect, lock, start:{geo}}
       // spots
+      proof: false,
       spotSel: -1, spotSize: 0.02, spotMode: 'heal', spotFeather: 50, spotOpacity: 100, spotsVisible: true,
       // masks
       maskIdx: -1, maskCreate: null, maskOverlay: false, brush: { size: 80, feather: 50, flow: 70, erase: false },
@@ -110,7 +111,9 @@
     /* ---------------- rendering ---------------- */
     function geoSig(s) { return JSON.stringify([s.geo, s.transform, s.lens.distortion, s.lens.pr, s.lens.p1, s.lens.p2, s.lens.p3, s.lens.p4, st.tool === 'crop']); }
     function renderOpts(extra) {
-      const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS ? 'p3' : 'srgb' };
+      // soft proof: the picture as an sRGB file or screen will show it, with what sRGB cannot hold marked
+      const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS && !st.proof ? 'p3' : 'srgb' };
+      if (st.proof) o.gamutWarn = true;
       if (st.tool === 'crop') {
         const s = srcInfo();
         // crop override must be expressed for the level being rendered; normalized so identical

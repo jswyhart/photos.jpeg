@@ -134,7 +134,7 @@
   uniform sampler2D uInLut; uniform mat3 uInMat; uniform float uKnee;
   uniform bool uCubeIn; uniform highp sampler3D uCube; uniform float uCubeAmt, uCubeN;   // imported .cube used as a camera LUT
   uniform bool uSI;              // per-file source transform (developed RAW): display LUT, rawlog decode, matrix
-  uniform sampler2D uSiLut, uDecLut; uniform mat3 uSiMat; uniform mat3 uSiPre; uniform bool uSiPreOn;
+  uniform sampler2D uSiLut, uDecLut; uniform mat3 uSiMat; uniform mat3 uSiPre; uniform bool uSiPreOn; uniform bool uSrcP3;
   float lk(sampler2D t, float v){   // same linear interpolation as the CPU's 256-entry lookups
     float f = clamp(v, 0.0, 1.0) * 255.0; int i = min(int(f), 254);
     return mix(texelFetch(t, ivec2(i, 0), 0).r, texelFetch(t, ivec2(i + 1, 0), 0).r, f - float(i));
@@ -183,7 +183,10 @@
       }
       lin = max(uSiMat * l, 0.0);
       raw = toSrgb(lin);
-    } else lin = toLin(raw);
+    } else {
+      lin = toLin(raw);
+      if (uSrcP3 && inside) { lin = max(uSiPre * lin, 0.0); raw = toSrgb(lin); }      // a Display P3 picture edited in sRGB
+    }
     float y0 = luma(raw);
     if (uLensVig != 0.0) {
       vec2 dc = s - uSrcSize*0.5;
@@ -707,7 +710,10 @@
       gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, useLog ? this.inLutTex : this.dummy); gl.uniform1i(pr.locs.uInLut, 5);
       this.bindCube(pr, s, opts, 12, 'input');
       const si = !useLog && opts.srcInput && opts.srcInput.lut ? opts.srcInput : null;
-      this.wideNow = !!(si && si.space === 'p3' && opts.wide);       // this frame's numbers are Display P3 already
+      const plainP3 = !useLog && !si && opts.srcInput && opts.srcInput.space === 'p3';      // a Display P3 picture (phone JPEG, HEIC)
+      this.wideNow = !!(((si && si.space === 'p3') || plainP3) && opts.wide);       // this frame's numbers are Display P3 already
+      gl.uniform1i(pr.locs.uSrcP3, plainP3 && !opts.wide ? 1 : 0);
+      { const q = P.P3_TO_SRGB; gl.uniformMatrix3fv(pr.locs.uSiPre, false, [q[0], q[3], q[6], q[1], q[4], q[7], q[2], q[5], q[8]]); }
       gl.uniform1i(pr.locs.uSI, si ? 1 : 0);
       if (si) {
         const up = (tex, arr) => {

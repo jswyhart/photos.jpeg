@@ -741,14 +741,25 @@
     const wideChk = UI.checkbox('Wide colour (Display P3)', false, (v) => {
       if (!photo) return;
       if (v) photo.wide = true; else delete photo.wide;
+      proofRow.style.display = v ? '' : 'none';
       Cat.scheduleSave();
       viewer.update('commit'); E.queueThumb(photo, true);
       UI.toast(v ? 'Edited in Display P3: colours beyond sRGB are kept for wide-colour screens and exports' : 'Edited in sRGB', 'palette');
     });
-    const wideRow = h('div', { class: 'wide-row', title: 'RAW photos only. Keeps the colours the camera recorded beyond sRGB. Turning it on or off can shift strongly saturated colours slightly.' }, wideChk.el);
-    controls.push({ sync: () => { wideRow.style.display = photo && photo.isRaw && photo.kind !== 'video' ? '' : 'none'; wideChk.set(!!(photo && photo.wide)); } });
+    const wideRow = h('div', { class: 'wide-row', title: 'For RAW photos and photos saved in Display P3 (most phones). Keeps the colours recorded beyond sRGB. Turning it on or off can shift strongly saturated colours slightly.' }, wideChk.el);
+    const proofChk = UI.checkbox('Soft proof as sRGB', false, (v) => {
+      viewer.st.proof = !!v; viewer.update('commit');
+      if (v) UI.toast('Showing the photo as an sRGB file or screen will; colours sRGB cannot hold are marked in magenta', 'eye');
+    });
+    const proofRow = h('div', { class: 'wide-row', title: 'Only changes what you see here, not the photo. For wide-colour photos: how an sRGB export will look, with out-of-gamut colours in magenta.' }, proofChk.el);
+    const hasP3 = () => { const src = photo && E.cachedSource(photo); return !!(photo && photo.kind !== 'video' && (photo.isRaw || (src && src.input && src.input.space === 'p3'))); };
+    controls.push({ sync: () => {
+      const on = hasP3();
+      wideRow.style.display = on ? '' : 'none'; wideChk.set(!!(photo && photo.wide));
+      proofRow.style.display = on && photo.wide ? '' : 'none'; proofChk.set(viewer.st.proof);
+    } });
     calPanel.body.append(
-      wideRow,
+      wideRow, proofRow,
       h('div', { class: 'sub' }, 'Shadows'),
       bslider('calib.shadowTint', 'Tint', -100, 100, { rail: 'tint' }),
       h('div', { class: 'sub' }, 'Red Primary'),

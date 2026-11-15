@@ -189,7 +189,7 @@
       exif: {}, rating: 0, flag: 0, label: '', title: '', caption: '', keywords: [],
       settings, history: [{ label: 'Import', settings: P.clone(settings), t: Date.now() }], historyIndex: 0,
       snapshots: [], virtualOf: null, copyName: '', thumbV: 0, edited: false, missing: false,
-      ...(PJ.Decode.isRaw(desc.name) && !isVid && pref('raw.wide', true) !== false ? { wide: true } : {}),
+      ...(!isVid && pref('raw.wide', true) !== false ? { wide: true } : {}),      // matters only when the source holds Display P3 (RAW, phone photos)
       ...(desc.sidecar ? { sidecar: desc.sidecar } : {}),
       ...(isVid ? { kind: 'video', isRaw: !!desc.cdng || PJ.Decode.isRawVideo(desc.name), video: desc.cdng ? { cdng: desc.cdng } : {}, videoTime: null } : { kind: 'photo' })
     };

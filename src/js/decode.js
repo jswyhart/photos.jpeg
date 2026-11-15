@@ -315,7 +315,8 @@
     const browserFirst = ['heif'].includes(jsKind) || !jsKind;
     const viaBrowser = async () => {
       const img = await bitmapFromBytes(bytes, mime);
-      return { image: img, width: img.width, height: img.height, isRaw: false, format: e.toUpperCase() || 'IMG', exif };
+      const p3 = isDisplayP3(bytes) && PJ.Engine && PJ.Engine.P3_CANVAS;
+      return Object.assign({ image: img, width: img.width, height: img.height, isRaw: false, format: e.toUpperCase() || 'IMG', exif }, p3 ? { input: { space: 'p3' } } : {});
     };
     const viaJs = async () => {
       const r = await F.decode(bytes, e);
@@ -346,7 +347,22 @@
   }
 
   /** High-quality downscale of a drawable to ImageData with the longest edge <= maxEdge. */
-  function toImageData(image, maxEdge) {
+  /**
+   * True when a file says its colours are Display P3 (phone JPEG and HEIC files usually do): its
+   * colour profile's name is in the first part of the file, uncompressed in both formats.
+   */
+  function isDisplayP3(bytes) {
+    const n = Math.min(bytes.length, 400000), pat = [0x44, 0x69, 0x73, 0x70, 0x6c, 0x61, 0x79, 0x20, 0x50, 0x33];      // "Display P3"
+    outer: for (let i = 0; i < n - 10; i++) {
+      if (bytes[i] !== 0x44) continue;
+      for (let k = 1; k < 10; k++) if (bytes[i + k] !== pat[k]) continue outer;
+      return true;
+    }
+    return false;
+  }
+  /** space: 'p3' reads the picture's Display P3 values as they are instead of narrowing them to sRGB. */
+  function toImageData(image, maxEdge, space) {
+    const cs = space === 'p3' ? { colorSpace: 'display-p3' } : undefined;
     let w = image.width, h = image.height;
     const scale = maxEdge ? Math.min(1, maxEdge / Math.max(w, h)) : 1;
     const tw = Math.max(1, Math.round(w * scale)), th = Math.max(1, Math.round(h * scale));
@@ -355,21 +371,21 @@
     while (cw / 2 >= tw * 1.0001 && ch / 2 >= th) {
       const nw = Math.max(tw, Math.round(cw / 2)), nh = Math.max(th, Math.round(ch / 2));
       const c = makeCanvas(nw, nh);
-      const cx = c.getContext('2d');
+      const cx = c.getContext('2d', cs);
       cx.imageSmoothingQuality = 'high';
       cx.drawImage(cur, 0, 0, nw, nh);
       cur = c; cw = nw; ch = nh;
     }
     const out = makeCanvas(tw, th);
-    const ctx = out.getContext('2d', { willReadFrequently: true });
+    const ctx = out.getContext('2d', Object.assign({ willReadFrequently: true }, cs));
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(cur, 0, 0, tw, th);
-    let data = ctx.getImageData(0, 0, tw, th);
+    let data = ctx.getImageData(0, 0, tw, th, cs);
     if (cur !== image && looksBlank(data)) {
       // Multi-step downscale came back empty: draw straight from the source instead.
       ctx.clearRect(0, 0, tw, th);
       ctx.drawImage(image, 0, 0, tw, th);
-      data = ctx.getImageData(0, 0, tw, th);
+      data = ctx.getImageData(0, 0, tw, th, cs);
     }
     if (looksBlank(data)) console.warn('Decoded image is blank', w, h, tw, th);
     return data;
@@ -381,5 +397,5 @@
   function resizePixels(src, maxEdge) { return PJ.Pipeline.resizePixels(src, maxEdge); }
 
   global.PJ = global.PJ || {};
-  global.PJ.Decode = { resizePixels, RAW_EXT, STD_EXT, VIDEO_EXT, RAW_VIDEO_EXT, ext, isRaw, isVideo, isRawVideo, isSupported, parseExif, decode, toImageData, makeCanvas, formatShutter };
+  global.PJ.Decode = { resizePixels, RAW_EXT, STD_EXT, VIDEO_EXT, RAW_VIDEO_EXT, ext, isRaw, isVideo, isRawVideo, isSupported, parseExif, decode, toImageData, isDisplayP3, makeCanvas, formatShutter };
 })(typeof self !== 'undefined' ? self : this);

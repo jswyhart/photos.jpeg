@@ -1385,7 +1385,7 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn) {
     if (conv) gamutTables();
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
     const outw = Math.max(1, reg0.w), outh = Math.max(1, reg0.h);
@@ -1393,15 +1393,19 @@
     // 16 bits per channel (RGB) for exports that ask for it: the edit's own precision, not rounded to 8 bits
     const out16 = want16 ? new Uint16Array(outw * outh * 3) : null;
     const hr = new Uint32Array(256), hg = new Uint32Array(256), hb = new Uint32Array(256), hl = new Uint32Array(256);
-    let nHi = 0, nLo = 0;
+    let nHi = 0, nLo = 0, nOut = 0;
     for (let j = 0; j < outh; j++) {
       let si = (j + oy) * w + ox;
       let di = (j * outw) << 2;
       for (let k = 0; k < outw; k++, si++, di += 4) {
         let x = R[si], y = G[si], z = B[si];
+        let outside = false;
         if (conv) {
           const lr = fLin(x), lg = fLin(y), lb = fLin(z);
-          x = fEnc(conv[0] * lr + conv[1] * lg + conv[2] * lb); y = fEnc(conv[3] * lr + conv[4] * lg + conv[5] * lb); z = fEnc(conv[6] * lr + conv[7] * lg + conv[8] * lb);
+          const cr = conv[0] * lr + conv[1] * lg + conv[2] * lb, cg = conv[3] * lr + conv[4] * lg + conv[5] * lb, cb = conv[6] * lr + conv[7] * lg + conv[8] * lb;
+          // soft proof: a colour the narrower space cannot hold (it would be clipped there)
+          if (warn && (cr < -0.004 || cg < -0.004 || cb < -0.004 || cr > 1.004 || cg > 1.004 || cb > 1.004)) outside = true;
+          x = fEnc(cr); y = fEnc(cg); z = fEnc(cb);
         }
         if (out16 !== null) {
           const q = (j * outw + k) * 3;
@@ -1413,6 +1417,7 @@
         hl[(r * 54 + g * 183 + b * 19) >> 8]++;
         if (r >= 255 || g >= 255 || b >= 255) { nHi++; if (clipHi) { r = 255; g = 40; b = 40; } }
         else if (r <= 0 && g <= 0 && b <= 0) { nLo++; if (clipLo) { r = 40; g = 90; b = 255; } }
+        if (outside) { r = 255; g = 0; b = 255; nOut++; }
         if (ovW !== null) {
           const a = ovW[si] * 0.55;
           r = r + (230 - r) * a; g = g + (30 - g) * a; b = b + (60 - b) * a;
@@ -1420,7 +1425,7 @@
         out[di] = r; out[di + 1] = g; out[di + 2] = b; out[di + 3] = 255;
       }
     }
-    return { out, out16, outw, outh, hist: { r: hr, g: hg, b: hb, l: hl }, clip: { hi: nHi, lo: nLo } };
+    return { out, out16, outw, outh, hist: { r: hr, g: hg, b: hb, l: hl }, clip: { hi: nHi, lo: nLo, out: nOut } };
   }
 
   /**
@@ -1469,7 +1474,8 @@
     const wide = isWide(s, opts);
     if (cube && s.lut.stage === 'input') applyCube(R, G, B, N, cube, s.lut.amount / 100);
     else if (s.input && s.input.profile !== 'none') stageInput(R, G, B, N, s.input);
-    else if (opts.srcInput) stageSourceInput(R, G, B, N, opts.srcInput, wide);
+    else if (opts.srcInput && opts.srcInput.lut) stageSourceInput(R, G, B, N, opts.srcInput, wide);
+    else if (opts.srcInput && opts.srcInput.space === 'p3' && !wide) convertPlanes(R, G, B, N, P3_TO_SRGB);   // a Display P3 picture edited in sRGB
 
     // 2. Noise reduction
     const det = s.detail;
@@ -1541,7 +1547,7 @@
     // 8. Output
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
-    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null);
+    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn);
     return {
       space: wide && opts.outSpace === 'p3' ? 'p3' : 'srgb',
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,
