@@ -91,7 +91,66 @@ function hdr(id) {
   const sm = imgs.map(im => small(im, 640)), mean = sm.map(s => { let a = 0; for (let i = 0; i < s.d.length; i++) a += s.d[i]; return a / s.d.length; });
   const order = mean.map((m, i) => i).sort((a, b) => mean[a] - mean[b]), ref = order[K >> 1];
   if (mean[order[K - 1]] - mean[order[0]] < 6) throw new Error('These photos are all about equally bright — an HDR merge needs different exposures');
-  const shift = sm.map((s, i) => { if (i === ref) return [0, 0]; const [x, y] = shiftBetween(sm[ref], s); return [x * s.step, y * s.step]; });
+  // Hand-held brackets differ by a small turn as well as a shift. Where enough corners can be matched
+  // between an exposure and the middle one, that exposure is redrawn to sit exactly on it; where they
+  // cannot (very dark or blown frames), a plain shift is found from brightness patterns instead.
+  const align = [], refCorners = corners(sm[ref], 1200);
+  let seed = 4321; const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const shift = sm.map((s, i) => {
+    if (i === ref) { align.push('reference'); return [0, 0]; }
+    const c = corners(s, 1200), m = matchCorners(c, refCorners);
+    const r = m.length >= 30 ? ransac(m.map(([a]) => [c[a].x, c[a].y]), m.map(([, b]) => [refCorners[b].x, refCorners[b].y]), rand) : null;
+    if (r && r.inliers.length >= 25) {
+      const Hi = inv(r.H), st = s.step, im = imgs[i], out = new Uint8Array(w * h * 3), src = im.rgb;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const p = apply(Hi, (x + 0.5) / st - 0.5, (y + 0.5) / st - 0.5);
+        const fx = Math.min(w - 1.001, Math.max(0, (p[0] + 0.5) * st - 0.5)), fy = Math.min(h - 1.001, Math.max(0, (p[1] + 0.5) * st - 0.5));
+        const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, q = (iy * w + ix) * 3, q2 = q + w * 3, o = (y * w + x) * 3;
+        for (let k = 0; k < 3; k++) out[o + k] = (src[q + k] * (1 - tx) + src[q + 3 + k] * tx) * (1 - ty) + (src[q2 + k] * (1 - tx) + src[q2 + 3 + k] * tx) * ty + 0.5;
+      }
+      imgs[i] = { w, h, rgb: out }; sm[i] = small(imgs[i], 640);
+      align.push('matched on ' + r.inliers.length + ' corners');
+      return [0, 0];
+    }
+    const [x, y] = shiftBetween(sm[ref], s);
+    align.push('shift only');
+    return [x * s.step, y * s.step];
+  });
+  // Things that moved between the exposures (people, leaves, cars) would show as ghosts. Where an
+  // exposure disagrees with the middle one beyond what the difference in exposure explains, it is left
+  // out there and the middle exposure decides.
+  const ghost = [], ghostShare = [];
+  {
+    const R = sm[ref], lin = (v) => Math.pow(v / 255, 2.2), okv = (v) => v > 20 && v < 235;
+    for (let k = 0; k < K; k++) {
+      if (k === ref) { ghost.push(null); ghostShare.push(0); continue; }
+      const S = sm[k], ox = Math.round(shift[k][0] / S.step), oy = Math.round(shift[k][1] / S.step), n = R.w * R.h;
+      const at = (x, y) => S.d[Math.min(S.h - 1, Math.max(0, y + oy)) * S.w + Math.min(S.w - 1, Math.max(0, x + ox))];
+      const ratios = [];
+      for (let y = 0; y < R.h; y += 2) for (let x = 0; x < R.w; x += 2) { const a = R.d[y * R.w + x], b = at(x, y); if (okv(a) && okv(b)) ratios.push(lin(b) / lin(a)); }
+      if (ratios.length < 200) { ghost.push(null); ghostShare.push(0); continue; }       // too little in common to judge
+      ratios.sort((p, q) => p - q);
+      const g = ratios[ratios.length >> 1], raw = new Float32Array(n);
+      // judged colour by colour: something of the same brightness but another colour has moved just as much
+      const A = imgs[ref].rgb, B = imgs[k].rgb, st = R.step, fx = shift[k][0], fy = shift[k][1];
+      for (let y = 0; y < R.h; y++) for (let x = 0; x < R.w; x++) {
+        const a = R.d[y * R.w + x], b = at(x, y);
+        if (!okv(a) || !okv(b)) continue;
+        // the middle pixel of the cell stands for it
+        const cx = Math.min(w - 1, x * st + (st >> 1)), cy = Math.min(h - 1, y * st + (st >> 1));
+        const qa = (cy * w + cx) * 3, qb = (Math.min(h - 1, Math.max(0, cy + fy)) * w + Math.min(w - 1, Math.max(0, cx + fx))) * 3;
+        let off = false;
+        for (let c = 0; c < 3 && !off; c++) { const la = lin(A[qa + c]) * g, lb = lin(B[qb + c]); if (Math.abs(la - lb) > 0.4 * Math.max(la, lb) + 0.02) off = true; }
+        const la = lin(a) * g, lb = lin(b);
+        if (off || Math.abs(la - lb) > 0.4 * Math.max(la, lb) + 0.012) raw[y * R.w + x] = 1;
+      }
+      const soft = blur5(blur5(raw, R.w, R.h), R.w, R.h); let cnt = 0;
+      for (let i = 0; i < n; i++) { soft[i] = Math.min(1, soft[i] * 4); if (soft[i] > 0.5) cnt++; }
+      // a frame that disagrees almost everywhere is not showing movement: it is misaligned or lit differently, and masking it all would only hide that
+      if (cnt > n * 0.4) { ghost.push(null); ghostShare.push(0); continue; }
+      ghost.push(soft); ghostShare.push(+(cnt / n).toFixed(4));
+    }
+  }
   // What "well exposed" means depends on the place: a sky should end up light and a shadow dark, only
    // less extremely so than in any single exposure. The aim for each place comes from how bright it is
    // in the middle exposure (seen coarsely): mid-grey for mid-tones, lighter for what is bright there.
@@ -101,7 +160,7 @@ function hdr(id) {
   const W = [], sum = new Float32Array(N);
   for (let k = 0; k < K; k++) {
     say(0.05 + 0.2 * k / K, 'Weighing exposure ' + (k + 1));
-    const s = imgs[k].rgb, [sx, sy] = shift[k], wk = new Float32Array(N), Y = new Float32Array(N);
+    const s = imgs[k].rgb, [sx, sy] = shift[k], wk = new Float32Array(N), Y = new Float32Array(N), gk = ghost[k];
     for (let y = 0; y < h; y++) { const yy = Math.min(h - 1, Math.max(0, y + sy)); for (let x = 0; x < w; x++) { const i = (yy * w + Math.min(w - 1, Math.max(0, x + sx))) * 3; Y[y * w + x] = (s[i] + s[i + 1] + s[i + 2]) / 765; } }
     for (let y = 0; y < h; y++) {
       const yy = Math.min(h - 1, Math.max(0, y + sy));
@@ -112,6 +171,7 @@ function hdr(id) {
         const sat = Math.sqrt(((r - m) * (r - m) + (g - m) * (g - m) + (b - m) * (b - m)) / 3);
         const lap = Math.abs(4 * Y[p] - Y[x > 0 ? p - 1 : p] - Y[x < w - 1 ? p + 1 : p] - Y[y > 0 ? p - w : p] - Y[y < h - 1 ? p + w : p]);
         wk[p] = (lap + 0.02) * (sat + 0.05) * well + 1e-6;
+        if (gk) wk[p] *= 1 - 0.995 * gk[Math.min(rs.h - 1, (y / rs.step) | 0) * rs.w + Math.min(rs.w - 1, (x / rs.step) | 0)];
         sum[p] += wk[p];
       }
     }
@@ -142,7 +202,7 @@ function hdr(id) {
     for (let l = L - 2; l >= 0; l--) { const [a, b] = sizes[l], up = grow(res, sizes[l + 1][0], sizes[l + 1][1], a, b), al = acc[l]; for (let p = 0; p < a * b; p++) al[p] += up[p]; res = al; }
     for (let p = 0; p < N; p++) { const v = res[p] * 257; out[p * 3 + c] = v < 0 ? 0 : v > 65535 ? 65535 : v + 0.5; }
   }
-  return { w, h, rgb16: out, stats: { shifts: shift, reference: ref } };
+  return { w, h, rgb16: out, stats: { shifts: shift, reference: ref, align, ghost: ghostShare } };
 }
 
 /* ---------------- panorama ---------------- */
@@ -294,14 +354,27 @@ function pano(id, focal, maxPixels) {
   if (fw * scale * fh * scale > maxPixels) scale = Math.sqrt(maxPixels / (fw * fh));
   const W = Math.max(8, Math.round(fw * scale)), H = Math.max(8, Math.round(fh * scale));
   const out = new Uint16Array(W * H * 3);
-  const band = 128, acc = new Float32Array(W * band * 3), wt = new Float32Array(W * band);
+  // Blending in two bands (after Brown & Lowe): the broad light and colour of each photo is mixed over
+  // a wide stretch, so differences in exposure fade out gently, while the fine detail is taken almost
+  // entirely from whichever photo is strongest at that point, so things that do not line up exactly
+  // show once and sharp instead of twice and blurred.
+  const low = imgs.map((im, i) => {
+    const s = sm[i], st = s.step, planes = [0, 1, 2].map(() => new Float32Array(s.w * s.h));
+    for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) {
+      let a = 0, b = 0, c = 0;
+      for (let dy = 0; dy < st; dy++) { let q = ((y * st + dy) * im.w + x * st) * 3; for (let dx = 0; dx < st; dx++, q += 3) { a += im.rgb[q]; b += im.rgb[q + 1]; c += im.rgb[q + 2]; } }
+      const n = st * st, p = y * s.w + x; planes[0][p] = a / n; planes[1][p] = b / n; planes[2][p] = c / n;
+    }
+    return planes.map(pl => blur5(blur5(pl, s.w, s.h), s.w, s.h));
+  });
+  const band = 128, acc = new Float32Array(W * band * 3), wt = new Float32Array(W * band), accH = new Float32Array(W * band * 3), wtH = new Float32Array(W * band);
   let seamSum = 0, seamN = 0;
   for (let by = 0; by < H; by += band) {
     const bh = Math.min(band, H - by);
-    acc.fill(0); wt.fill(0);
+    acc.fill(0); wt.fill(0); accH.fill(0); wtH.fill(0);
     say(0.3 + 0.68 * by / H, 'Joining');
     for (let i = 0; i < K; i++) {
-      const im = imgs[i], s = im.rgb, st = sm[i].step, sw = sm[i].w, sh = sm[i].h, g = G[i];
+      const im = imgs[i], s = im.rgb, st = sm[i].step, sw = sm[i].w, sh = sm[i].h, g = G[i], lo = low[i];
       for (let y = 0; y < bh; y++) {
         const v = fy0 + (by + y + 0.5) / scale;
         for (let x = 0; x < W; x++) {
@@ -315,15 +388,22 @@ function pano(id, focal, maxPixels) {
           const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
           const r = (s[q] * w00 + s[q + 3] * w10 + s[q2] * w01 + s[q2 + 3] * w11) * g, gg = (s[q + 1] * w00 + s[q + 4] * w10 + s[q2 + 1] * w01 + s[q2 + 4] * w11) * g, bl = (s[q + 2] * w00 + s[q + 5] * w10 + s[q2 + 2] * w01 + s[q2 + 5] * w11) * g;
           const before = wt[y * W + x];
-          if (before > 1e-4 && wgt > 0.01 && (x & 7) === 0 && (y & 7) === 0) { seamSum += Math.abs(acc[o + 1] / before - gg); seamN++; }      // how well overlapping photos agree
-          acc[o] += r * wgt; acc[o + 1] += gg * wgt; acc[o + 2] += bl * wgt; wt[y * W + x] = before + wgt;
+          if (before > 1e-4 && wgt > 0.01 && (x & 7) === 0 && (y & 7) === 0) { seamSum += Math.abs(acc[o + 1] / before + accH[o + 1] / wtH[y * W + x] - gg); seamN++; }      // how well overlapping photos agree
+          // the broad band of this photo here, from its small blurred copy
+          const lx = Math.min(sw - 1.001, Math.max(0, p[0])), ly = Math.min(sh - 1.001, Math.max(0, p[1])), jx = lx | 0, jy = ly | 0, ux = lx - jx, uy = ly - jy, lq = jy * sw + jx;
+          const l00 = (1 - ux) * (1 - uy), l10 = ux * (1 - uy), l01 = (1 - ux) * uy, l11 = ux * uy;
+          const lr = (lo[0][lq] * l00 + lo[0][lq + 1] * l10 + lo[0][lq + sw] * l01 + lo[0][lq + sw + 1] * l11) * g, lg = (lo[1][lq] * l00 + lo[1][lq + 1] * l10 + lo[1][lq + sw] * l01 + lo[1][lq + sw + 1] * l11) * g, lb = (lo[2][lq] * l00 + lo[2][lq + 1] * l10 + lo[2][lq + sw] * l01 + lo[2][lq + sw + 1] * l11) * g;
+          const wh = wgt * wgt * wgt * wgt + 1e-12;
+          acc[o] += lr * wgt; acc[o + 1] += lg * wgt; acc[o + 2] += lb * wgt; wt[y * W + x] = before + wgt;
+          accH[o] += (r - lr) * wh; accH[o + 1] += (gg - lg) * wh; accH[o + 2] += (bl - lb) * wh; wtH[y * W + x] += wh;
         }
       }
     }
     for (let y = 0; y < bh; y++) for (let x = 0; x < W; x++) {
       const ww = wt[y * W + x]; if (!(ww > 0)) continue;
       const o = (y * W + x) * 3, t = ((by + y) * W + x) * 3;
-      for (let k = 0; k < 3; k++) { const v = acc[o + k] / ww * 257; out[t + k] = v < 0 ? 0 : v > 65535 ? 65535 : v + 0.5; }
+      const hw = wtH[y * W + x];
+      for (let k = 0; k < 3; k++) { const v = (acc[o + k] / ww + accH[o + k] / hw) * 257; out[t + k] = v < 0 ? 0 : v > 65535 ? 65535 : v + 0.5; }
     }
   }
   return { w: W, h: H, rgb16: out, stats: { matches: counts, gains: G.map(g => +g.toFixed(3)), focalKnown: known, overlapDiff: seamN ? +(seamSum / seamN).toFixed(2) : null } };
