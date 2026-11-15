@@ -29,36 +29,44 @@
     people: { model: 'scene', classes: [12], name: 'People', busy: 'Finding people…' }
   };
 
-  /* ---------------- the runtime ---------------- */
-  let ortPromise = null;
-  const sessions = {};
-  function runtime() {
-    if (!ortPromise) {
-      const base = new URL('vendor/ml/', location.href).href;
-      ortPromise = import(base + 'ort.wasm.min.mjs').then((ort) => {
-        ort.env.wasm.wasmPaths = base;
-        ort.env.wasm.numThreads = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 2));
-        // (the runtime's own "proxy" worker does not start under this app's isolation settings; a run takes
-        // a fifth of a second on its threads, once per mask, so it is called directly)
-        return ort;
-      });
-      ortPromise.catch(() => { ortPromise = null; });
+  /* ---------------- the runtime: in a thread of its own (aiworker.js) ---------------- */
+  let worker = null, seq = 0;
+  const waiting = new Map();
+  function modelWorker() {
+    if (!worker) {
+      worker = new Worker(new URL('js/aiworker.js', location.href).href, { type: 'module' });
+      worker.onmessage = (ev) => {
+        const m = ev.data, w = waiting.get(m.id);
+        if (!w) return;
+        waiting.delete(m.id);
+        if (m.error) w.reject(new Error(m.error)); else w.resolve(m);
+      };
+      worker.onerror = (ev) => {
+        const err = new Error('The mask model could not be started: ' + (ev && ev.message || 'its thread failed to load'));
+        for (const w of waiting.values()) w.reject(err);
+        waiting.clear();
+        try { worker.terminate(); } catch (_) { }
+        worker = null;
+      };
     }
-    return ortPromise;
+    return worker;
   }
-  async function session(model) {
-    if (!sessions[model]) {
-      const ort = await runtime();
-      const url = new URL('vendor/ml/' + MODELS[model].file, location.href).href;
-      sessions[model] = ort.InferenceSession.create(url, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' })
-        .catch((e) => { delete sessions[model]; throw new Error(/404|Failed to fetch|no such file/i.test(String(e && e.message)) ? `The model for this mask (${MODELS[model].file}) isn't part of this build` : 'The mask model could not be started: ' + (e && e.message || e)); });
-    }
-    return sessions[model];
+  /** Run a model on a prepared input; resolves to { data, dims }. */
+  function infer(model, input) {
+    const M = MODELS[model];
+    return new Promise((resolve, reject) => {
+      const id = ++seq;
+      waiting.set(id, { resolve, reject });
+      modelWorker().postMessage({ id, model, file: M.file, size: M.size, input }, [input.buffer]);
+    }).catch((e) => {
+      const msg = String(e && e.message || e);
+      throw new Error(/404|Failed to fetch|no such file|failed to load model/i.test(msg) ? `The model for this mask (${M.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The mask model could not be started: ' + msg);
+    });
   }
 
   /* ---------------- image → network → probability ---------------- */
   /** RGBA pixels → a 1×3×n×n float tensor, stretched to the square the networks expect, ImageNet-normalised. */
-  function toTensor(ort, img, n) {
+  function toTensor(img, n) {
     const c = PJ.Decode.makeCanvas(img.width, img.height);
     c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(img.data), img.width, img.height), 0, 0);
     const s = PJ.Decode.makeCanvas(n, n), x = s.getContext('2d', { willReadFrequently: true });
@@ -67,15 +75,32 @@
     const d = x.getImageData(0, 0, n, n).data, f = new Float32Array(3 * n * n), N = n * n;
     const mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
     for (let i = 0; i < N; i++) for (let k = 0; k < 3; k++) f[k * N + i] = (d[i * 4 + k] / 255 - mean[k]) / std[k];
-    return new ort.Tensor('float32', f, [1, 3, n, n]);
+    return f;
+  }
+
+  /* The scene model's answer for a photo is the same whatever is asked of it (sky, people, what is
+     in the picture), so the last few are kept: Sky after People costs nothing. */
+  const sceneCache = new Map();
+  function sceneKey(img) {
+    const d = img.data; let hsh = img.width * 31 + img.height;
+    for (let i = 0; i < d.length; i += 997) hsh = (hsh * 33 + d[i]) | 0;
+    return img.width + 'x' + img.height + ':' + hsh;
+  }
+  async function sceneScores(img) {
+    const key = sceneKey(img);
+    if (!sceneCache.has(key)) {
+      const pr = infer('scene', toTensor(img, MODELS.scene.size));
+      sceneCache.set(key, pr);
+      pr.catch(() => sceneCache.delete(key));
+      if (sceneCache.size > 4) sceneCache.delete(sceneCache.keys().next().value);
+    }
+    return sceneCache.get(key);
   }
 
   /** Probability (0…1) per cell of the network's output grid: { data, w, h }. */
   async function probability(kind, img) {
     const K = KINDS[kind], M = MODELS[K.model];
-    const ort = await runtime(), s = await session(K.model);
-    const out = await s.run({ [s.inputNames[0]]: toTensor(ort, img, M.size) });
-    const t = out[s.outputNames[0]], d = t.data;
+    const t = K.model === 'scene' ? await sceneScores(img) : await infer(K.model, toTensor(img, M.size)), d = t.data;
     if (K.model === 'subject') {
       // U²-Net: one saliency map, stretched to its own range
       const h = t.dims[2], w = t.dims[3], p = new Float32Array(w * h);
@@ -242,5 +267,31 @@
     return { ai: kind, map: { id, w: map.w, h: map.h }, name: KINDS[kind].name };
   }
 
-  global.PJ.AIMask = { KINDS, create, ensure, ready, _test: { compute, probability, refine } };
+  /**
+   * What the scene model sees in a photo: [{ label, share }] for the kinds of thing that cover a
+   * worthwhile part of the picture, largest first. Used to suggest keywords.
+   */
+  async function describe(photo) {
+    const img = await PJ.Engine.render(photo, P.defaultSettings(), 'draft', {}, 0);
+    if (!img) throw new Error('The photo could not be rendered');
+    const t = await sceneScores(img), d = t.data, C = t.dims[1], N = t.dims[2] * t.dims[3];
+    const count = new Float32Array(C);
+    for (let i = 0; i < N; i++) {
+      let mx = -Infinity, arg = 0, second = -Infinity;
+      for (let c = 0; c < C; c++) { const v = d[c * N + i]; if (v > mx) { second = mx; mx = v; arg = c; } else if (v > second) second = v; }
+      if (mx - second > 1) count[arg]++;          // only cells the model is fairly sure of
+    }
+    const out = [];
+    for (let c = 0; c < C; c++) {
+      const label = SCENE_LABELS[c], share = count[c] / N;
+      if (label && share >= (SMALL_THINGS.has(c) ? 0.008 : 0.04)) out.push({ label, share });
+    }
+    return out.sort((p, q) => q.share - p.share);
+  }
+  /* ADE20K classes worth offering as a keyword, by class number. Left out: parts of rooms and
+     things too generic to search for (wall, floor, ceiling, …). */
+  const SCENE_LABELS = { 1: 'building', 2: 'sky', 4: 'tree', 6: 'road', 7: 'bed', 9: 'grass', 12: 'people', 13: 'earth', 16: 'mountain', 17: 'plant', 19: 'chair', 20: 'car', 21: 'water', 23: 'sofa', 25: 'house', 26: 'sea', 29: 'field', 32: 'fence', 34: 'rock', 46: 'sand', 48: 'skyscraper', 52: 'path', 53: 'stairs', 60: 'river', 61: 'bridge', 66: 'flower', 67: 'book', 68: 'hill', 72: 'palm tree', 76: 'boat', 80: 'bus', 83: 'truck', 84: 'tower', 90: 'airplane', 91: 'dirt track', 94: 'pole', 102: 'van', 103: 'ship', 104: 'fountain', 109: 'swimming pool', 113: 'waterfall', 114: 'tent', 116: 'motorbike', 126: 'animal', 127: 'bicycle', 128: 'lake', 136: 'traffic light', 149: 'flag' };
+  const SMALL_THINGS = new Set([12, 20, 66, 76, 80, 83, 90, 102, 103, 116, 126, 127, 136, 149]);
+
+  global.PJ.AIMask = { KINDS, create, ensure, ready, describe, _test: { compute, probability, refine } };
 })(window);
