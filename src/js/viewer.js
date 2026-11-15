@@ -750,15 +750,24 @@
       }
       if (st.tool === 'spot') {
         const hit = hitSpot(x, y);
-        if (hit) { st.spotSel = hit.i; events.emit('spotSel'); drag = { kind: 'spot', i: hit.i, part: hit.part, x, y, start: P.clone(st.photo.settings.spots[hit.i]) }; draw(); return; }
+        if (hit) {
+          st.spotSel = hit.i; events.emit('spotSel');
+          const spots = st.photo.settings.spots, one = spots[hit.i];
+          // a stroke moves as one piece
+          const starts = new Map((one.g ? spots.filter(q => q.g === one.g) : [one]).map(q => [q, P.clone(q)]));
+          drag = { kind: 'spot', i: hit.i, part: hit.part, x, y, start: P.clone(one), starts };
+          draw(); return;
+        }
         const [u, v] = foToSrc(fo[0], fo[1]);
         if (u < 0 || v < 0) return;
         const r = st.spotSize;
         const [su, sv] = autoSource(u, v, r);
         st.photo.settings.spots.push({ id: Cat.uid('sp_'), x: u, y: v, r, sx: su, sy: sv, mode: st.spotMode, feather: st.spotFeather, opacity: st.spotOpacity });
         st.spotSel = st.photo.settings.spots.length - 1;
-        Cat.commit(st.photo, st.spotMode === 'clone' ? 'Clone spot' : 'Heal spot');
-        update('commit');
+        // Dragging on paints a stroke: more spots along the path, all taking their pixels from the same
+        // distance and direction, so wires, scratches and dust trails can be removed in one go.
+        drag = { kind: 'spotStroke', off: [su - u, sv - v], last: [u, v], r, g: null, n: 1 };
+        update('live');
         events.emit('spotSel');
         return;
       }
@@ -837,13 +846,32 @@
         events.emit('geo');
         return;
       }
+      if (drag.kind === 'spotStroke') {
+        const [u, v] = foToSrc(...toFo(x, y, pane));
+        if (u < 0 || v < 0 || drag.n >= 400) return;
+        const spots = st.photo.settings.spots;
+        // lay spots down about every half radius, so they overlap into a continuous line
+        let d = Math.hypot(u - drag.last[0], v - drag.last[1]);
+        const stepLen = drag.r * 0.6;
+        while (d >= stepLen && drag.n < 400) {
+          const t = stepLen / d, nu = drag.last[0] + (u - drag.last[0]) * t, nv = drag.last[1] + (v - drag.last[1]) * t;
+          if (!drag.g) { drag.g = Cat.uid('st_'); spots[spots.length - 1].g = drag.g; }
+          spots.push({ id: Cat.uid('sp_'), x: nu, y: nv, r: drag.r, sx: nu + drag.off[0], sy: nv + drag.off[1], mode: st.spotMode, feather: st.spotFeather, opacity: st.spotOpacity, g: drag.g });
+          drag.last = [nu, nv]; drag.n++;
+          d = Math.hypot(u - nu, v - nv);
+        }
+        st.spotSel = spots.length - 1;
+        update('live');
+        return;
+      }
       if (drag.kind === 'spot') {
-        const sp = st.photo.settings.spots[drag.i];
         const [u0, v0] = foToSrc(...toFo(drag.x, drag.y, pane));
         const [u1, v1] = foToSrc(...toFo(x, y, pane));
         const du = u1 - u0, dv = v1 - v0;
-        if (drag.part === 'dest') { sp.x = drag.start.x + du; sp.y = drag.start.y + dv; if (!e.altKey) { sp.sx = drag.start.sx + du; sp.sy = drag.start.sy + dv; } }
-        else { sp.sx = drag.start.sx + du; sp.sy = drag.start.sy + dv; }
+        for (const [sp, start] of drag.starts) {
+          if (drag.part === 'dest') { sp.x = start.x + du; sp.y = start.y + dv; if (!e.altKey) { sp.sx = start.sx + du; sp.sy = start.sy + dv; } }
+          else { sp.sx = start.sx + du; sp.sy = start.sy + dv; }
+        }
         drag.moved = true;
         update('live');
         return;
@@ -916,8 +944,13 @@
         update('commit'); events.emit('geo');
       } else if (d.kind === 'cropMove' || d.kind === 'cropHandle') {
         events.emit('geo');
+      } else if (d.kind === 'spotStroke') {
+        const what = st.spotMode === 'clone' ? 'Clone' : 'Heal';
+        Cat.commit(st.photo, d.n > 1 ? `${what} stroke` : `${what} spot`);
+        update('commit');
+        events.emit('spotSel');
       } else if (d.kind === 'spot') {
-        if (d.moved) { Cat.commit(st.photo, 'Move spot'); update('commit'); }
+        if (d.moved) { Cat.commit(st.photo, d.starts.size > 1 ? 'Move stroke' : 'Move spot'); update('commit'); }
       } else if (d.kind === 'maskCreate') {
         const m = activeMask();
         if (m && m.type === 'radial' && m.rx < 0.012 && m.ry < 0.012) { m.rx = 0.12; m.ry = 0.09; }
@@ -1196,9 +1229,11 @@
       // spots
       deleteSelectedSpot() {
         if (st.tool !== 'spot' || st.spotSel < 0) return false;
-        st.photo.settings.spots.splice(st.spotSel, 1);
+        const spots = st.photo.settings.spots, g = spots[st.spotSel] && spots[st.spotSel].g;
+        // a stroke is removed whole
+        if (g) st.photo.settings.spots = spots.filter(q => q.g !== g); else spots.splice(st.spotSel, 1);
         st.spotSel = -1;
-        Cat.commit(st.photo, 'Delete spot'); update('commit'); events.emit('spotSel');
+        Cat.commit(st.photo, g ? 'Delete stroke' : 'Delete spot'); update('commit'); events.emit('spotSel');
         return true;
       },
       // masks
