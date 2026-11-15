@@ -107,6 +107,13 @@ final class Bridge: NSObject, WKScriptMessageHandlerWithReply {
                 return true
             }
 
+        case "modelStatus":
+            background(reply) { store.modelStatus() }
+
+        case "modelFetch":
+            let name = a["name"] as? String ?? ""
+            background(reply) { try store.modelFetch(name) }
+
         case "cleanStore":
             let keep = a["keep"] as? [String] ?? [], remove = a["remove"] as? Bool ?? false
             background(reply) { store.cleanStore(keep: keep, remove: remove) }

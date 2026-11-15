@@ -34,6 +34,14 @@ class Storage(private val context: Context) {
             "hif", "jxl", "jp2", "j2k", "jpf", "jpx", "ico", "cur", "dib", "apng", "psd", "psb", "exr", "hdr", "pic", "pfm", "pbm", "pgm", "ppm", "pnm", "pam", "tga", "icb", "vda", "qoi")
         val VIDEO = setOf("mp4", "mov", "m4v", "mkv", "webm", "mts", "m2ts", "mxf", "avi", "lrv", "360", "insv", "3gp", "mpg", "mpeg", "m2v", "vob", "wmv", "flv", "3g2", "mod", "tod", "dv", "ogv",
             "braw", "r3d", "ari", "arx", "crm", "nev")
+        /** name → (size in bytes, SHA-256); the same table as windows/Models.cs */
+        val MODELS = mapOf(
+            "u2netp.onnx" to (4574861L to "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8"),
+            "efficientvit-seg-b1-ade20k.onnx" to (19312501L to "d6013483203730a1b12c700013bd440231d6778064ffdb63b0582785e40e89a5"),
+            "face_detection_yunet_2023mar.onnx" to (232589L to "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
+            "face_recognition_sface_2021dec.onnx" to (38696353L to "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79")
+        )
+        const val MODEL_BASE = "https://raw.githubusercontent.com/jswyhart/photos.jpeg/main/src/vendor/ml/"
         val WRITABLE = setOf("jpg", "jpeg", "png", "webp", "tif", "tiff", "jxl", "dng", "json", "mp4", "mov", "cube", "xmp", "txt")
         val TEXT_EXT = setOf("json", "cube", "xmp", "txt")
         const val CHUNK = 8L shl 20
@@ -76,6 +84,51 @@ class Storage(private val context: Context) {
     fun thumbFile(id: String) = File(thumbsDir, safeId(id) + ".jpg")
     fun saveThumb(id: String, bytes: ByteArray) = thumbFile(id).writeBytes(bytes)
     fun deleteThumb(id: String) { thumbFile(id).delete() }
+
+    // ---------------- models (a "lite" build leaves them out of the app and fetches each on first use) ----------------
+
+    private val modelsDir = File(root, "models")
+    /** The downloaded copy of a model, or null when there is none (or the name is not one of ours). */
+    fun modelFile(name: String): File? = if (MODELS.containsKey(name)) File(modelsDir, name).takeIf { it.isFile } else null
+    private fun inApp(name: String) = runCatching { context.assets.open("web/vendor/ml/$name").close(); true }.getOrDefault(false)
+    fun modelStatus(): JSONArray {
+        val out = JSONArray()
+        for ((name, v) in MODELS) out.put(JSONObject().put("name", name).put("size", v.first).put("have", inApp(name) || modelFile(name) != null))
+        return out
+    }
+    fun serveModel(name: String): WebResourceResponse? = modelFile(name)?.let { response("application/octet-stream", it.inputStream()) }
+    /** Download one model from the app's repository, check its size and SHA-256, and keep it. progress: 0…1. */
+    fun modelFetch(name: String, progress: (Double) -> Unit): JSONObject {
+        val want = MODELS[name] ?: throw IllegalArgumentException("That is not a model of this app")
+        synchronized(MODELS) {
+            if (modelFile(name) != null) return JSONObject().put("name", name).put("ok", true)
+            modelsDir.mkdirs()
+            val tmp = File(modelsDir, "$name.part")
+            try {
+                val conn = java.net.URL(MODEL_BASE + name).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 20000; conn.readTimeout = 60000
+                conn.setRequestProperty("User-Agent", "photos.jpeg")
+                if (conn.responseCode != 200) throw java.io.IOException("The download failed (${conn.responseCode}) — is this device online?")
+                val sha = java.security.MessageDigest.getInstance("SHA-256")
+                var got = 0L; var last = 0.0
+                conn.inputStream.use { src -> tmp.outputStream().use { dst ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = src.read(buf); if (n <= 0) break
+                        got += n
+                        if (got > want.first) throw java.io.IOException("The downloaded file is larger than it should be")
+                        dst.write(buf, 0, n); sha.update(buf, 0, n)
+                        val f = got.toDouble() / want.first
+                        if (f - last >= 0.02) { last = f; progress(f) }
+                    }
+                } }
+                val hex = sha.digest().joinToString("") { "%02x".format(it) }
+                if (got != want.first || hex != want.second) throw java.io.IOException("The downloaded file is not the one this app expects, so it was not kept")
+                if (!tmp.renameTo(File(modelsDir, name))) throw java.io.IOException("The model could not be saved")
+                return JSONObject().put("name", name).put("ok", true)
+            } finally { tmp.delete() }
+        }
+    }
 
     /**
      * Catalog clean-up: counts (and, when asked, removes) the files in the thumbnail store that no photo,

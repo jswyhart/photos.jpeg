@@ -29,6 +29,8 @@ echo "› Bundling resources"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources/web"
 rsync -a --delete ../src/ "$APP/Contents/Resources/web/"
+# LITE=1 ./build.sh: leave the neural-network models out; the app downloads each on first use
+if [[ "${LITE:-}" == "1" ]]; then rm -f "$APP/Contents/Resources/web/vendor/ml/"*.onnx; fi
 if [[ -x ../tools/braw/build/pj-braw ]]; then   # optional Blackmagic RAW helper (see tools/braw/README.md)
   mkdir -p "$APP/Contents/Resources/tools"
   cp -R ../tools/braw/build/pj-braw ../tools/braw/build/*.framework "$APP/Contents/Resources/tools/" 2>/dev/null || true

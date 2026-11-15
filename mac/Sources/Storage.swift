@@ -1,5 +1,6 @@
 // photos.jpeg for macOS — catalog, thumbnails, file scanning and export writing.
 import Foundation
+import CryptoKit
 
 enum PJError: LocalizedError {
     case message(String)
@@ -76,6 +77,44 @@ final class Storage {
         return out
     }
     func thumbURL(_ id: String) -> URL { thumbsURL.appendingPathComponent(Storage.safeId(id) + ".jpg") }
+
+    // MARK: Models (a "lite" build leaves them out of the app and fetches each on first use)
+
+    /// name → (size in bytes, SHA-256); the same table as windows/Models.cs
+    static let models: [String: (size: Int, sha: String)] = [
+        "u2netp.onnx": (4574861, "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8"),
+        "efficientvit-seg-b1-ade20k.onnx": (19312501, "d6013483203730a1b12c700013bd440231d6778064ffdb63b0582785e40e89a5"),
+        "face_detection_yunet_2023mar.onnx": (232589, "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"),
+        "face_recognition_sface_2021dec.onnx": (38696353, "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79")
+    ]
+    static let modelBase = "https://raw.githubusercontent.com/jswyhart/photos.jpeg/main/src/vendor/ml/"
+    var modelsURL: URL { root.appendingPathComponent("models", isDirectory: true) }
+
+    /// The downloaded copy of a model, or nil when there is none (or the name is not one of ours).
+    func modelURL(_ name: String) -> URL? {
+        guard Storage.models[name] != nil else { return nil }
+        let u = modelsURL.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: u.path) ? u : nil
+    }
+    func modelStatus() -> [[String: Any]] {
+        let bundled = Bundle.main.resourceURL!.appendingPathComponent("web/vendor/ml", isDirectory: true)
+        return Storage.models.map { name, v in
+            let have = FileManager.default.fileExists(atPath: bundled.appendingPathComponent(name).path) || modelURL(name) != nil
+            return ["name": name, "size": v.size, "have": have]
+        }
+    }
+    /// Download one model from the app's repository, check its size and SHA-256, and keep it.
+    func modelFetch(_ name: String) throws -> [String: Any] {
+        guard let want = Storage.models[name], let url = URL(string: Storage.modelBase + name) else { throw PJError.message("That is not a model of this app") }
+        if modelURL(name) != nil { return ["name": name, "ok": true] }
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch { throw PJError.message("The download failed — is this Mac online?") }
+        let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard data.count == want.size, sha == want.sha else { throw PJError.message("The downloaded file is not the one this app expects, so it was not kept") }
+        try FileManager.default.createDirectory(at: modelsURL, withIntermediateDirectories: true)
+        try data.write(to: modelsURL.appendingPathComponent(name), options: .atomic)
+        return ["name": name, "ok": true]
+    }
 
     /// Catalog clean-up: counts (and, when asked, removes) the files in the thumbnail store that no photo,
     /// mask, fill or face of the catalog refers to any more. Files written in the last ten minutes are left

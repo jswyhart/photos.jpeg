@@ -81,8 +81,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             replied = true
             NSApp.reply(toApplicationShouldTerminate: true)
         }
-        web.callAsyncJavaScript("await PJ.Catalog.save(); return true;", arguments: [:], in: nil, in: .page) { _ in finish() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish() }
+        // Exports still running: the editor asks whether to quit anyway (no time limit while the question is on screen).
+        web.evaluateJavaScript("(window.PJ && PJ.Exporter && PJ.Exporter.queueLength) ? PJ.Exporter.queueLength() : 0") { value, _ in
+            let busy = (value as? NSNumber)?.intValue ?? 0
+            if busy > 0 {
+                self.web.callAsyncJavaScript("return await PJ.App.quitCheck();", arguments: [:], in: nil, in: .page) { result in
+                    if case .success(let v) = result, let ok = v as? Bool, ok == false {
+                        self.terminating = false
+                        if !replied { replied = true; NSApp.reply(toApplicationShouldTerminate: false) }
+                    } else { finish() }
+                }
+            } else {
+                self.web.callAsyncJavaScript("await PJ.Catalog.save(); return true;", arguments: [:], in: nil, in: .page) { _ in finish() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish() }
+            }
+        }
         return .terminateLater
     }
 

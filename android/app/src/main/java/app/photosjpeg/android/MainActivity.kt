@@ -96,6 +96,8 @@ class MainActivity : AppCompatActivity() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val url = request.url
                 if (url.host == HOST && url.path?.startsWith("/__pj/") == true) return storage.serve(url, request.requestHeaders ?: emptyMap())
+                // a model this build does not carry but that has been downloaded
+                if (url.host == HOST && url.path?.contains("/vendor/ml/") == true) url.lastPathSegment?.let { n -> storage.serveModel(n)?.let { return it } }
                 return assetLoader.shouldInterceptRequest(url)
             }
 

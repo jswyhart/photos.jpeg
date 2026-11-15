@@ -35,6 +35,8 @@ android {
 
 val copyWebApp by tasks.registering(Sync::class) {
     from(rootProject.file("../src"))
+    // gradle assembleRelease -Plite: leave the neural-network models out; the app downloads each on first use
+    if (project.hasProperty("lite")) exclude("vendor/ml/*.onnx")
     into(layout.buildDirectory.dir("generated/webassets/web"))
 }
 tasks.named("preBuild") { dependsOn(copyWebApp) }

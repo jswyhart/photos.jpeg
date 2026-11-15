@@ -89,7 +89,7 @@
       listBackups: WIN ? () => call('listBackups') : null, backupNow: WIN ? () => call('backupNow') : null, restoreBackup: WIN ? (name) => call('restoreBackup', { name }) : null,
       moveFile: WIN ? (path, dest, name) => call('moveFile', { path, dest: dest || '', name }) : null,
       watchFolder: WIN ? (path) => call('watchFolder', { path: path || '' }) : null, onWatchFiles: (cb) => on('watchFiles', cb),
-      modelStatus: WIN ? () => call('modelStatus') : null, modelFetch: WIN ? (name) => call('modelFetch', { name }) : null, onModelProgress: (cb) => on('modelProgress', cb),
+      modelStatus: () => call('modelStatus'), modelFetch: (name) => call('modelFetch', { name }), onModelProgress: (cb) => on('modelProgress', cb),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,
       chooseDirectory: (def) => call('chooseDirectory', { path: def || '' }),

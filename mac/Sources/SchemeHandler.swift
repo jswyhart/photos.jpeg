@@ -137,7 +137,13 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
             if rel.isEmpty || rel == "/" { rel = "/index.html" }
             let file = webRoot.appendingPathComponent(String(rel.dropFirst())).standardizedFileURL
             guard file.path.hasPrefix(webRoot.path) else { return Reply(status: 403, data: Data(), mime: "text/plain") }
-            var data = try Data(contentsOf: file)
+            // a model this build does not carry but that has been downloaded
+            var data: Data
+            if !FileManager.default.fileExists(atPath: file.path), rel.hasPrefix("/vendor/ml/"), let got = Storage.shared.modelURL(file.lastPathComponent) {
+                data = try Data(contentsOf: got)
+            } else {
+                data = try Data(contentsOf: file)
+            }
             // Give every script/stylesheet URL a fresh version token so WebKit's in-memory
             // cache can never hand back code from an earlier build or reload.
             if file.pathExtension.lowercased() == "html", var html = String(data: data, encoding: .utf8) {
