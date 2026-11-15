@@ -326,10 +326,18 @@
     }
     return out.sort((p, q) => q.share - p.share);
   }
+  /** Which of the 150 kinds of thing the scene model sees at each cell of its grid: { w, h, data: Uint8Array }. */
+  async function labels(photo) {
+    const img = await PJ.Engine.render(photo, P.defaultSettings(), 'draft', {}, 0);
+    if (!img) return null;
+    const t = await sceneScores(img), d = t.data, C = t.dims[1], h = t.dims[2], w = t.dims[3], N = w * h, out = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { let mx = -Infinity, arg = 0; for (let c = 0; c < C; c++) { const v = d[c * N + i]; if (v > mx) { mx = v; arg = c; } } out[i] = arg; }
+    return { w, h, data: out };
+  }
   /* ADE20K classes worth offering as a keyword, by class number. Left out: parts of rooms and
      things too generic to search for (wall, floor, ceiling, …). */
   const SCENE_LABELS = { 1: 'building', 2: 'sky', 4: 'tree', 6: 'road', 7: 'bed', 9: 'grass', 12: 'people', 13: 'earth', 16: 'mountain', 17: 'plant', 19: 'chair', 20: 'car', 21: 'water', 23: 'sofa', 25: 'house', 26: 'sea', 29: 'field', 32: 'fence', 34: 'rock', 46: 'sand', 48: 'skyscraper', 52: 'path', 53: 'stairs', 60: 'river', 61: 'bridge', 66: 'flower', 67: 'book', 68: 'hill', 72: 'palm tree', 76: 'boat', 80: 'bus', 83: 'truck', 84: 'tower', 90: 'airplane', 91: 'dirt track', 94: 'pole', 102: 'van', 103: 'ship', 104: 'fountain', 109: 'swimming pool', 113: 'waterfall', 114: 'tent', 116: 'motorbike', 126: 'animal', 127: 'bicycle', 128: 'lake', 136: 'traffic light', 149: 'flag' };
   const SMALL_THINGS = new Set([12, 20, 66, 76, 80, 83, 90, 102, 103, 116, 126, 127, 136, 149]);
 
-  global.PJ.AIMask = { KINDS, runModel, create, ensure, ready, describe, retarget, hasAi, _test: { compute, probability, refine } };
+  global.PJ.AIMask = { KINDS, runModel, labels, create, ensure, ready, describe, retarget, hasAi, _test: { compute, probability, refine } };
 })(window);

@@ -86,12 +86,20 @@
       alpha[i] = Math.round(t * t * (3 - 2 * t) * 255);
     }
     if (hole >= pw * ph * 0.7) throw new Error('The painted area is too large to fill from what is left around it');
-    const orig = rgb.slice();
-    const out = await run({ w: pw, h: ph, rgb, mask });
+    // what is where around the hole (sky, trees, road …), when the scene model is there to say
+    let label = null;
+    try {
+      const lm = PJ.AIMask && PJ.AIMask.labels ? await PJ.AIMask.labels(photo) : null;
+      if (lm) {
+        label = new Uint8Array(pw * ph);
+        for (let y = 0; y < ph; y++) { const ly = Math.min(lm.h - 1, Math.floor((y0 + (y + 0.5) / k) / H * lm.h)); for (let x = 0; x < pw; x++) label[y * pw + x] = lm.data[ly * lm.w + Math.min(lm.w - 1, Math.floor((x0 + (x + 0.5) / k) / W * lm.w))]; }
+      }
+    } catch (e) { console.warn('fill: no scene map, filling by texture alone:', e && e.message); }
+    const out = await run(label ? { w: pw, h: ph, rgb, mask, label } : { w: pw, h: ph, rgb, mask });
     const map = new Uint8Array(pw * ph * 4);
     for (let i = 0; i < pw * ph; i++) { map[i * 4] = out[i * 3]; map[i * 4 + 1] = out[i * 3 + 1]; map[i * 4 + 2] = out[i * 3 + 2]; map[i * 4 + 3] = alpha[i]; }
     const id = PJ.Catalog.uid('cf');
-    return { id, map: { w: pw, h: ph, data: map }, patch: { id, x: x0 / L, y: y0 / L, w: bw / L, h: bh / L, pw, ph, of: photo.id }, _orig: orig };
+    return { id, map: { w: pw, h: ph, data: map }, patch: { id, x: x0 / L, y: y0 / L, w: bw / L, h: bh / L, pw, ph, of: photo.id }, guided: !!label };
   }
   function remember(id, map) { P.setMaskMap(id, map.w, map.h, map.data); }
   async function store(id, map) {

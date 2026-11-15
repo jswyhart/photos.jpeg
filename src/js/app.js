@@ -1427,7 +1427,19 @@
       const added = await importDescs(descs);
       if (added.length === 1) openDevelop(added[0].id);
     });
-    API.onFlush(async () => { await Cat.save(); });
+    API.onFlush(async () => {
+      // exports still running: closing would cut them off, so ask first
+      const n = PJ.Exporter && PJ.Exporter.queueLength ? PJ.Exporter.queueLength() : 0;
+      if (n > 0 && API.closeHold) {
+        await API.closeHold();
+        const go = await UI.confirm('An export is still running', `${n} export job${n === 1 ? ' has' : 's have'} not finished. Closing now stops ${n === 1 ? 'it' : 'them'}; files already written stay where they are.`, 'Close anyway', true);
+        if (!go) return false;
+        await Cat.save();
+        API.closeNow();
+        return false;
+      }
+      await Cat.save();
+    });
     if (API.onBack) API.onBack(() => back());
     window.addEventListener('beforeunload', () => { Cat.save(); });
 

@@ -12,7 +12,12 @@
  * This is repeated from a small version of the picture up to full size, so
  * large structures are settled first and detail last.
  *
- * in:  { id, w, h, rgb: Uint8Array(w·h·3), mask: Uint8Array(w·h) — 1 inside the hole }
+ * Optionally the picture comes with a map of what is where (label: one number per pixel — sky, tree,
+ * road … from the scene model). The hole is then divided among the kinds of thing around it, each
+ * part going to whichever is nearest, and a part is filled from material of its own kind: trees from
+ * trees, sky from sky.
+ *
+ * in:  { id, w, h, rgb: Uint8Array(w·h·3), mask: Uint8Array(w·h) — 1 inside the hole, label?: Uint8Array(w·h) }
  * out: { id, rgb: Uint8Array(w·h·3) } or { id, error }
  * ===================================================================== */
 'use strict';
@@ -34,7 +39,37 @@ function half(l) {
     if (n) { img[o] = r / n; img[o + 1] = g / n; img[o + 2] = b / n; } else { img[o] = r2 / 4; img[o + 1] = g2 / 4; img[o + 2] = b2 / 4; }
     hole[y * w + x] = any;
   }
-  return { w, h, img, hole };
+  const out = { w, h, img, hole };
+  if (l.lab) { out.lab = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.lab[y * w + x] = l.lab[Math.min(l.h - 1, y * 2) * l.w + Math.min(l.w - 1, x * 2)]; }
+  return out;
+}
+
+/** What kind of thing each pixel should be: its own kind outside the hole, inside it the kind of the nearest pixel outside. */
+function kinds(l) {
+  const { w, h, hole, lab } = l, g = Uint8Array.from(lab), seen = new Uint8Array(w * h);
+  // A kind of thing with little of it outside the hole cannot fill anything: what is left of the object
+  // being removed, a sliver of something at the edge. Such kinds do not spread into the hole (255 = any
+  // material will do), or the fill would be tiled from a few pixels.
+  const count = new Uint32Array(256); let outside = 0;
+  for (let i = 0; i < w * h; i++) if (!hole[i]) { count[lab[i]]++; outside++; }
+  const enough = Math.max(40, outside * 0.04);
+  let q = [];
+  for (let i = 0; i < w * h; i++) {
+    if (hole[i]) { g[i] = 255; continue; }
+    seen[i] = 1;
+    if (count[lab[i]] < enough) { g[i] = 255; continue; }
+    const x = i % w, y = (i / w) | 0;
+    if ((x > 0 && hole[i - 1]) || (x < w - 1 && hole[i + 1]) || (y > 0 && hole[i - w]) || (y < h - 1 && hole[i + w])) q.push(i);
+  }
+  while (q.length) {
+    const next = [];
+    for (const i of q) {
+      const x = i % w, y = (i / w) | 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !seen[j]) { seen[j] = 1; g[j] = g[i]; next.push(j); }
+    }
+    q = next;
+  }
+  return g;
 }
 
 /** First guess for the hole: colours creep in from its edge, ring by ring. */
@@ -103,6 +138,7 @@ function roles(l) {
   }
   // targets nearest the edge first: their matches are the best founded, and spread inward from there
   targets.sort((a, b) => depth[a] - depth[b] || a - b);
+  if (l.lab && !l.kind) l.kind = kinds(l);
   return { near, src, conf, depth, targets: Int32Array.from(targets), sources: Int32Array.from(sources) };
 }
 
@@ -123,7 +159,8 @@ function differ(l, t, s, best, conf) {
     }
     if (sum >= best * 49) return sum / 49 + 1e-3;            // already worse than the best, whatever the rest adds
   }
-  return sum / (wsum + 1e-6) * (1 + 0.6 * far);
+  // material of another kind than this place calls for is a poor match however alike it looks
+  return sum / (wsum + 1e-6) * (1 + 0.6 * far) + (l.kind && l.kind[t] !== 255 && l.lab[s] !== l.kind[t] ? 400 : 0);
 }
 
 /** One round of search: good matches spread to neighbours, and each target tries random places near its match. */
@@ -178,8 +215,9 @@ function blend(l, R, nnf, cost, flat) {
   for (let p = 0; p < w * h; p++) if (hole[p] && wt[p] > 0) { img[p * 3] = acc[p * 3] / wt[p]; img[p * 3 + 1] = acc[p * 3 + 1] / wt[p]; img[p * 3 + 2] = acc[p * 3 + 2] / wt[p]; }
 }
 
-function inpaint(w, h, rgb, mask) {
+function inpaint(w, h, rgb, mask, label) {
   const top = { w, h, img: Float32Array.from(rgb), hole: Uint8Array.from(mask, v => v ? 1 : 0) };
+  if (label && label.length === w * h) top.lab = label;
   let any = false, all = true;
   for (let i = 0; i < w * h; i++) { if (top.hole[i]) any = true; else all = false; }
   if (!any) return rgb;
@@ -245,7 +283,7 @@ function inpaint(w, h, rgb, mask) {
 if (typeof self !== 'undefined' && typeof self.postMessage === 'function' && typeof window === 'undefined') {
   self.onmessage = (ev) => {
     const m = ev.data;
-    try { const rgb = inpaint(m.w, m.h, m.rgb, m.mask); self.postMessage({ id: m.id, rgb }, [rgb.buffer]); }
+    try { const rgb = inpaint(m.w, m.h, m.rgb, m.mask, m.label); self.postMessage({ id: m.id, rgb }, [rgb.buffer]); }
     catch (e) { self.postMessage({ id: m.id, error: String(e && e.message || e) }); }
   };
 }

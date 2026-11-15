@@ -284,6 +284,33 @@
     return { space, icc: space !== 'srgb' || o.metadata !== 'none' ? PJ.ICC.profile(space) : null };
   }
 
+  /**
+   * A JPEG XL file with the photo's EXIF. The encoder writes a bare codestream; EXIF lives in the
+   * container format around it (ISO boxes: signature, file type, "Exif", then the codestream in "jxlc").
+   * app1: a JPEG APP1 segment (FF E1, length, "Exif\0\0", TIFF…). The colour space needs no box: the
+   * codestream itself says sRGB, which is what a JPEG XL export holds.
+   */
+  function jxlWithExif(bytes, app1) {
+    if (!(bytes[0] === 0xff && bytes[1] === 0x0a)) return bytes;                 // already a container (or not a codestream): left as it is
+    if (!app1 || app1.length < 12 || app1[4] !== 0x45) return bytes;
+    const tiff = app1.subarray(10);
+    const box = (type, ...parts) => {
+      const n = 8 + parts.reduce((a, p) => a + p.length, 0), out = new Uint8Array(n), dv = new DataView(out.buffer);
+      dv.setUint32(0, n); for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+      let o = 8; for (const p of parts) { out.set(p, o); o += p.length; }
+      return out;
+    };
+    const parts = [
+      Uint8Array.from([0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a]),
+      box('ftyp', Uint8Array.from([0x6a, 0x78, 0x6c, 0x20, 0, 0, 0, 0, 0x6a, 0x78, 0x6c, 0x20])),
+      box('Exif', new Uint8Array(4), tiff),                                       // 4 bytes: where the TIFF header starts within the payload (0)
+      box('jxlc', bytes)
+    ];
+    const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+    let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
+
   /* JPEG XL: libjxl as WebAssembly, in its own thread (vendor/jxl, js/jxlworker.js) */
   let jxlWorker = null, jxlSeq = 0;
   const jxlWaiting = new Map();
@@ -314,7 +341,9 @@
     }
     if (o.format === 'jxl') {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      return encodeJxl(ctx.getImageData(0, 0, canvas.width, canvas.height), Math.max(1, Math.min(100, Math.round(o.quality))));
+      let jxl = await encodeJxl(ctx.getImageData(0, 0, canvas.width, canvas.height), Math.max(1, Math.min(100, Math.round(o.quality))));
+      if (o.metadata === 'all') { const app1 = buildExifApp1(photo); if (app1) jxl = jxlWithExif(jxl, app1); }
+      return jxl;
     }
     if (o.format === 'avif') {
       if (!API.encodeImage) throw new Error('AVIF export needs the Windows app with ffmpeg');
@@ -669,5 +698,5 @@
     }
   }
 
-  global.PJ.Exporter = { openDialog, exportPhotos, run, busy, queueLength: () => queue.length, encodeTiff, encodeTiffRich, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
+  global.PJ.Exporter = { openDialog, exportPhotos, run, busy, queueLength: () => queue.length, encodeTiff, encodeTiffRich, jxlWithExif, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
 })(window);

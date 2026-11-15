@@ -111,7 +111,9 @@
       checkForUpdates: WIN ? () => call('checkForUpdates') : null,   // same as Help → Check for Updates   // a line of text from the app shell (an update is available …)
       setExportPresets: WIN ? (items) => call('exportPresets', { items }).catch(() => { }) : null,   // File → Export with Preset
       onOpenPaths: (cb) => { on('openPaths', cb); call('ready').catch(() => { }); },
-      onFlush: (cb) => on('flush', async () => { try { await cb(); } finally { call('flushed').catch(() => { }); } }),
+      // the callback saves; when it resolves to false it has taken the decision to close into its own hands (closeHold / closeNow)
+      onFlush: (cb) => on('flush', async () => { let own = false; try { own = (await cb()) === false; } finally { if (!own) call('flushed').catch(() => { }); } }),
+      closeHold: () => call('closeHold'), closeNow: () => call('closeNow'),
       onBack: (cb) => on('back', async () => { const handled = await cb(); call('backResult', { handled: !!handled }).catch(() => { }); }),
       getPathForFile: () => '',
       // Files dropped on the window: the host resolves their paths and scans them

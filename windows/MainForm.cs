@@ -192,6 +192,14 @@ public sealed class MainForm : Form
         Activate();
     }
 
+    System.Windows.Forms.Timer? closeTimer;
+
+    /// The editor wants to ask something before the window goes (an export is still running): closing is put on hold.
+    public void HoldClose() => BeginInvoke(() => { closeTimer?.Dispose(); closeTimer = null; closing = false; });
+
+    /// The editor has saved and agreed to close.
+    public void CloseNow() => BeginInvoke(() => { closeTimer?.Dispose(); closeTimer = null; closing = true; flushed = true; Close(); });
+
     public void Flushed()
     {
         if (!closing || flushed) return;
@@ -211,7 +219,8 @@ public sealed class MainForm : Form
             closing = true;
             bridge.SendEvent("flush");
             var timer = new System.Windows.Forms.Timer { Interval = 2500 };
-            timer.Tick += (_, _) => { timer.Dispose(); if (!flushed) { flushed = true; Close(); } };
+            timer.Tick += (_, _) => { timer.Dispose(); if (closeTimer == timer) { closeTimer = null; if (!flushed) { flushed = true; Close(); } } };
+            closeTimer = timer;
             timer.Start();
             return;
         }

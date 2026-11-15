@@ -301,6 +301,8 @@ public sealed class Bridge
                 return true;
             }
             case "flushed": form.Flushed(); return true;
+            case "closeHold": form.HoldClose(); return true;
+            case "closeNow": form.CloseNow(); return true;
             case "representedFile":
             case "backResult": return true;
 
