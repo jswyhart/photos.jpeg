@@ -415,6 +415,8 @@ public sealed class MainForm : Form
                 Cmd("Flip Horizontal", "flipH"),
                 Cmd("Flip Vertical", "flipV"),
                 Sep(),
+                Cmd("Rename or Move…", "batchRename"),
+                Sep(),
                 Cmd("Merge to HDR…", "mergeHdr"),
                 Cmd("Merge to HDR (editable DNG)…", "mergeHdrDng"),
                 Cmd("Merge to Panorama…", "mergePano"),
@@ -458,6 +460,7 @@ public sealed class MainForm : Form
                 Cmd("About photos.jpeg", "about"),
                 updateItem,
 Cmd("Clean Up Catalog…", "cleanCatalog"),
+                Cmd("Catalog Backups…", "catalogBackups"),
                 Item("Show Log", () => { Log.Info("log opened from the Help menu"); try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch (Exception ex) { Log.Error("opening the log", ex); } }),
                 Item("Open Catalog Folder", () => Process.Start(new ProcessStartInfo(Storage.Root) { UseShellExecute = true })))
         ]);

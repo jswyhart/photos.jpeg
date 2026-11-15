@@ -608,3 +608,15 @@ img.face.off { opacity: 0.25; outline: 1px dashed #888; }
 .face-name { display: flex; gap: 6px; align-items: center; flex: none; }
 .face-name input { width: 150px; }
 .wide-row { padding: 2px 0 6px; }
+
+/* ---- backups, rename ---- */
+.backup-list { max-height: 46vh; overflow-y: auto; margin-top: 8px; }
+.backup-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.backup-row .grow { flex: 1; }
+.rename-preview { margin-top: 10px; padding: 8px 10px; background: rgba(255,255,255,.04); border-radius: 6px; font-size: 12px; line-height: 1.6; }
+@media print {
+  /* one photo per page: the whole photo on the page, or the page filled */
+  #print-root.single figure { height: 96vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #print-root.single img { width: auto; max-width: 100%; max-height: 92vh; object-fit: contain; }
+  #print-root.single.fill img { width: 100%; height: 94vh; max-height: none; object-fit: cover; }
+}

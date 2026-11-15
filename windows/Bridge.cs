@@ -17,6 +17,7 @@ public sealed class Bridge
     /// <summary>Open streaming writes (video export). Only touched on the UI thread; the bytes are written off it.</summary>
     sealed class Writer(FileStream stream, string path) { public readonly FileStream Stream = stream; public readonly string Path = path; public long Pos; }
     readonly Dictionary<int, Writer> writers = [];
+    FolderWatch? watch;
     int writerSeq;
 
     public Bridge(MainForm form, CoreWebView2 web)
@@ -126,6 +127,23 @@ public sealed class Bridge
                 string id = S(a, "id"); var data = Bytes(a, "data");
                 await Task.Run(() => Storage.WriteAtomic(Storage.ThumbPath(id), data));
                 return true;
+            }
+            case "listBackups": return await Task.Run(Storage.ListBackups);
+            case "backupNow": return await Task.Run(() => Storage.BackupNow());
+            case "restoreBackup": { var name = S(a, "name"); return await Task.Run(() => Storage.RestoreBackup(name)); }
+            case "moveFile":
+            {
+                string source = S(a, "path"), dest = S(a, "dest"), name = S(a, "name");
+                return await Task.Run(() => Storage.MoveFile(source, dest, name));
+            }
+            case "watchFolder":
+            {
+                var folder = S(a, "path");
+                watch?.Dispose(); watch = null;
+                if (folder.Length == 0) return new { watching = "" };
+                if (!Directory.Exists(folder)) throw new IOException("That folder is not there");
+                watch = new FolderWatch(folder, paths => form.BeginInvoke(() => SendEvent("watchFiles", new { paths })));
+                return new { watching = folder };
             }
             case "modelStatus": return Models.Status();
             case "modelFetch":

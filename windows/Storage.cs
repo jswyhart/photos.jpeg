@@ -342,6 +342,72 @@ public static class Storage
         }
     }
 
+    // ---------------- catalog backups ----------------
+
+    /// The catalog backups there are, newest first: the daily ones, those made by hand, and the copies
+    /// kept automatically before a restore.
+    public static object ListBackups()
+    {
+        if (!Directory.Exists(BackupsDir)) return Array.Empty<object>();
+        return new DirectoryInfo(BackupsDir).GetFiles("catalog-*.json").OrderByDescending(f => f.LastWriteTimeUtc)
+            .Select(f => new { name = f.Name, size = f.Length, time = new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeMilliseconds() }).ToArray();
+    }
+
+    /// A backup of the catalog as it is on disk right now (catalog-manual-<time>.json). Not counted among the 14 daily ones.
+    public static object BackupNow(string kind = "manual")
+    {
+        if (!File.Exists(CatalogPath)) throw new IOException("There is no catalog to back up yet");
+        using (var _ = JsonDocument.Parse(File.ReadAllText(CatalogPath, Encoding.UTF8))) { }
+        Directory.CreateDirectory(BackupsDir);
+        var name = $"catalog-{kind}-{DateTime.Now:yyyy-MM-dd-HHmmss}.json";
+        File.Copy(CatalogPath, Path.Combine(BackupsDir, name), true);
+        return new { name };
+    }
+
+    /// Put a backup in the catalog's place. What is there now is kept first (catalog-before-restore-<time>.json),
+    /// so a restore can itself be undone.
+    public static object RestoreBackup(string name)
+    {
+        if (name != Path.GetFileName(name) || !name.StartsWith("catalog-", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            throw new IOException("That is not a catalog backup");
+        var src = Path.Combine(BackupsDir, name);
+        if (!File.Exists(src)) throw new IOException("That backup is no longer there");
+        using (var _ = JsonDocument.Parse(File.ReadAllText(src, Encoding.UTF8))) { }       // a damaged backup must not replace a working catalog
+        string? kept = null;
+        if (File.Exists(CatalogPath)) { dynamic b = BackupNow("before-restore"); kept = b.name; }
+        File.Copy(src, CatalogPath, true);
+        return new { restored = name, kept };
+    }
+
+    // ---------------- renaming and moving originals ----------------
+
+    /// Rename a photo or clip and/or move it to another folder, with its sidecar files (name.xmp, name.ext.xmp).
+    /// Never overwrites: fails when something of that name is already there. The extension cannot be changed.
+    public static object MoveFile(string source, string destDir, string newName)
+    {
+        if (!File.Exists(source)) throw new IOException("The file is no longer where the catalog has it");
+        if (string.IsNullOrWhiteSpace(newName) || newName != Path.GetFileName(newName) || newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new IOException($"“{newName}” is not a usable file name");
+        if (!string.Equals(Path.GetExtension(newName), Path.GetExtension(source), StringComparison.OrdinalIgnoreCase))
+            throw new IOException("The file's extension cannot be changed");
+        var fromDir = Path.GetDirectoryName(Path.GetFullPath(source))!;
+        var toDir = string.IsNullOrWhiteSpace(destDir) ? fromDir : Path.GetFullPath(destDir);
+        var target = Path.Combine(toDir, newName);
+        var same = string.Equals(Path.GetFullPath(source), target, StringComparison.OrdinalIgnoreCase);
+        if (same && Path.GetFileName(source) == newName) return new { path = target, name = newName, folder = toDir, moved = false };
+        if (!same && (File.Exists(target) || Directory.Exists(target))) throw new IOException($"“{newName}” already exists in that folder");
+        Directory.CreateDirectory(toDir);
+        // sidecars first found, then moved after the file itself went through
+        var stem = Path.Combine(fromDir, Path.GetFileNameWithoutExtension(source));
+        var newStem = Path.Combine(toDir, Path.GetFileNameWithoutExtension(newName));
+        var side = new List<(string From, string To)>();
+        foreach (var (f, t) in new[] { (stem + ".xmp", newStem + ".xmp"), (source + ".xmp", target + ".xmp") })
+            if (File.Exists(f) && !File.Exists(t)) side.Add((f, t));
+        File.Move(source, target);
+        foreach (var (f, t) in side) { try { File.Move(f, t); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log.Warn($"sidecar not moved: {f}: {ex.Message}"); } }
+        return new { path = target, name = newName, folder = toDir, moved = true };
+    }
+
     /// Catalog clean-up. Counts (and, when asked, removes) the files in the thumbnail store that no
     /// photo, mask or LUT of the catalog refers to any more, and the RAW cache. Files written in the
     /// last ten minutes are left alone: something may be about to refer to them.

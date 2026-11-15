@@ -158,7 +158,7 @@
   }
   async function save() {
     clearTimeout(saveTimer); saveTimer = null;
-    if (state.newer) return;
+    if (state.newer || state.noSave) return;         // noSave: a backup was just put in the catalog's place and the app is about to reload
     try { await PJ.API.saveCatalog(serialize()); } catch (e) { console.error('catalog save failed', e); }
   }
   async function load() {

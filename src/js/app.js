@@ -218,15 +218,23 @@
   els.film.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { els.film.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
 
   /* ---------------- import ---------------- */
-  async function importDescs(descs) {
+  async function importDescs(descs, quiet) {
     let supported = descs.filter(d => PJ.Decode.isSupported(d.name));
     if (PJ.CDNG) supported = await PJ.CDNG.groupSequences(supported);
-    if (!supported.length) { UI.toast('No supported images found', 'triangle-exclamation'); return []; }
+    if (!supported.length) { if (!quiet) UI.toast('No supported images found', 'triangle-exclamation'); return []; }
     const added = Cat.addPhotos(supported);
     const dup = supported.length - added.length;
-    if (!added.length) { UI.toast(`All ${dup} photo(s) are already in the catalog`, 'circle-info'); return []; }
+    if (!added.length) { if (!quiet) UI.toast(`All ${dup} photo(s) are already in the catalog`, 'circle-info'); return []; }
     if (Cat.pref('lens.autoProfile', false)) added.forEach(p => { if (p.kind !== 'video') p.autoLens = true; });
     if (Cat.pref('nr.autoIso', false)) added.forEach(p => { if (p.kind !== 'video') p.autoNr = true; });
+    if (quiet) {
+      // photos that arrived by themselves (a watched folder): added without taking you away from what you are doing
+      library.setLastImport([...(Cat.pref('lib.lastImport', []) || []), ...added.map(p => p.id)]);
+      refresh(); added.forEach(p => E.queueThumb(p));
+      UI.toast(`${added.length} new photo${added.length > 1 ? 's' : ''} from the watched folder`, 'folder-open');
+      if (PJ.Faces && Cat.pref('faces.auto', false)) PJ.Faces.scan(added).catch(() => { });
+      return added;
+    }
     library.setLastImport(added.map(p => p.id));
     // once faces are in use, new photos are looked through as they arrive (in the background)
     if (PJ.Faces && Cat.pref('faces.auto', false)) PJ.Faces.scan(added).then((r) => {
@@ -841,6 +849,93 @@
     } finally { mergeBusy = false; UI.activity(''); }
   }
 
+  /* ---------------- catalog backups ---------------- */
+  async function catalogBackups() {
+    if (!API.listBackups) return UI.toast('Catalog backups are part of the Windows app', 'circle-info');
+    const body = h('div', { style: { width: '520px' } });
+    const kind = (n) => /before-restore/.test(n) ? 'kept before a restore' : /manual/.test(n) ? 'made by hand' : 'daily';
+    const fill = async () => {
+      let list = [];
+      try { list = await API.listBackups(); } catch (e) { body.replaceChildren(h('p', null, 'The backups could not be read: ' + (e.message || e))); return; }
+      body.replaceChildren(
+        h('p', { class: 'muted', style: { lineHeight: 1.5 } }, 'The catalog — your edits, ratings, keywords, collections and people — is copied once a day (the newest 14 are kept) and whenever you ask. Your photo files are not part of it and are never changed by a restore.'),
+        h('div', { class: 'backup-list' }, ...(list.length ? list.map(b => h('div', { class: 'backup-row' },
+          h('span', { class: 'grow' }, new Date(b.time).toLocaleString(), h('span', { class: 'muted small' }, `  ${kind(b.name)} · ${UI.fmtBytes(b.size)}`)),
+          h('button', { class: 'btn sm', onclick: async () => {
+            const ok = await UI.confirm('Restore this backup?', `The catalog goes back to how it was on ${new Date(b.time).toLocaleString()}. Edits made since are no longer in it, but the catalog as it is now is kept as a backup first, so this can be undone. The app reloads.`, 'Restore', true);
+            if (!ok) return;
+            try { await Cat.save(); Cat.state.noSave = true; await API.restoreBackup(b.name); location.reload(); }
+            catch (e) { Cat.state.noSave = false; UI.toast('The backup could not be restored: ' + (e.message || e), 'triangle-exclamation'); }
+          } }, 'Restore…'))) : [h('p', { class: 'muted' }, 'No backups yet.')])));
+    };
+    await fill();
+    UI.modal({ title: 'Catalog Backups', icon: 'clock-rotate-left', wide: true, body, buttons: [
+      { label: 'Back up now', onClick: async () => { try { await Cat.save(); await API.backupNow(); UI.toast('Catalog backed up', 'clock-rotate-left'); } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); } } },
+      { label: 'Close', primary: true }] });
+  }
+
+  /* ---------------- renaming and moving the files themselves ---------------- */
+  /** The name a template gives a photo (without extension). Tokens: {name} {date} {time} {seq} {model}. */
+  function renamed(p, template, n, pad) {
+    const d = (p.captureTime || '').replace(/[^0-9T]/g, ''), stem = p.name.replace(/\.[^.]+$/, '');
+    const s = template.replace(/\{name\}/gi, stem).replace(/\{date\}/gi, d.slice(0, 8) || 'undated').replace(/\{time\}/gi, d.slice(9, 15) || '000000')
+      .replace(/\{seq\}/gi, String(n).padStart(pad, '0')).replace(/\{model\}/gi, (p.exif && p.exif.model || 'camera').replace(/\s+/g, '-'));
+    return s.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
+  }
+  async function batchRename() {
+    if (!API.moveFile) return UI.toast('Renaming and moving files is part of the Windows app', 'circle-info');
+    // virtual copies share a file with their original: each file is handled once
+    const files = [...new Map(targets().filter(p => !p.missing && !(p.video && p.video.cdng)).map(p => [p.path, p])).values()]
+      .sort((a, b) => String(a.captureTime || '').localeCompare(String(b.captureTime || '')) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (!files.length) return UI.toast('Select the photos to rename or move first', 'circle-info');
+    const last = Cat.pref('rename.last', { template: '{name}', start: 1 });
+    const tpl = h('input', { type: 'text', value: last.template, style: { width: '100%' } }), start = h('input', { type: 'number', value: last.start || 1, min: 0, style: { width: '90px' } });
+    let dest = '';
+    const destEl = h('span', { class: 'muted' }, 'the folder each file is in now'), preview = h('div', { class: 'rename-preview' });
+    const pad = () => Math.max(3, String((+start.value || 1) + files.length - 1).length);
+    const names = () => files.map((p, i) => renamed(p, tpl.value.trim() || '{name}', (+start.value || 1) + i, pad()) + p.name.slice(p.name.lastIndexOf('.')));
+    const show = () => {
+      const ns = names(), dup = ns.length !== new Set(ns.map(n => n.toLowerCase())).size && !dest ? false : ns.length !== new Set(ns.map(n => n.toLowerCase())).size;
+      preview.replaceChildren(...files.slice(0, 4).map((p, i) => h('div', null, h('span', { class: 'muted' }, p.name), '  →  ', ns[i])), files.length > 4 ? h('div', { class: 'muted' }, `… and ${files.length - 4} more`) : null,
+        dup ? h('div', { style: { color: 'var(--warn, #e0a030)', marginTop: '6px' } }, 'Several files would get the same name — add {seq} or {name} to the pattern.') : null);
+      return !dup;
+    };
+    tpl.addEventListener('input', show); start.addEventListener('input', show);
+    show();
+    UI.modal({
+      title: `Rename or move ${files.length} file${files.length === 1 ? '' : 's'}`, icon: 'file-pen', wide: true,
+      body: h('div', null,
+        h('label', { class: 'field' }, h('span', null, 'Name pattern'), tpl),
+        h('p', { class: 'muted small' }, '{name} the present name · {date} capture date (20261115) · {time} capture time · {seq} a running number · {model} the camera. The extension stays.'),
+        h('label', { class: 'field' }, h('span', null, 'Numbers start at'), start),
+        h('div', { class: 'field' }, h('span', null, 'Move to'), h('div', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, destEl,
+          h('button', { class: 'btn sm', onclick: async () => { const d = await API.chooseDirectory(dest || files[0].folder); if (d) { dest = d; destEl.textContent = d; destEl.classList.remove('muted'); show(); } } }, 'Choose folder…'),
+          h('button', { class: 'btn sm', onclick: () => { dest = ''; destEl.textContent = 'the folder each file is in now'; destEl.classList.add('muted'); show(); } }, 'Stay'))),
+        preview,
+        h('p', { class: 'muted small', style: { marginTop: '10px' } }, 'This renames or moves the files on disk, with their .xmp sidecars. The catalog follows, so edits stay with their photos. Nothing is overwritten: a file whose new name is taken is left as it is.')),
+      buttons: [{ label: 'Cancel' }, { label: dest ? 'Rename / Move' : 'Rename', primary: true, onClick: async () => {
+        if (!show()) return UI.toast('Several files would get the same name', 'triangle-exclamation');
+        const ns = names(); let done = 0; const failed = [];
+        Cat.setPref('rename.last', { template: tpl.value.trim() || '{name}', start: +start.value || 1 });
+        for (let i = 0; i < files.length; i++) {
+          const p = files[i], from = p.path;
+          UI.activity(`Renaming ${p.name}…`, i / files.length);
+          try {
+            const r = await API.moveFile(from, dest, ns[i]);
+            if (!r.moved) continue;
+            // every catalog entry of that file (the photo and its virtual copies) follows it
+            for (const q of Cat.state.photos) if (q.path === from) { E.invalidate(q); q.path = r.path; q.name = r.name; q.folder = r.folder; }
+            done++;
+          } catch (e) { failed.push(`${p.name}: ${e && e.message || e}`); }
+        }
+        UI.activity('');
+        Cat.scheduleSave(); refresh(); library.renderAll && library.renderAll();
+        if (failed.length) UI.modal({ title: `${done} done, ${failed.length} left as they were`, icon: 'triangle-exclamation', body: h('div', { style: { maxHeight: '40vh', overflow: 'auto', width: '480px' } }, ...failed.map(f => h('div', null, f))), buttons: [{ label: 'OK', primary: true }] });
+        else UI.toast(`${done} file${done === 1 ? '' : 's'} ${dest ? 'renamed / moved' : 'renamed'}`, 'file-pen');
+      } }]
+    });
+  }
+
   /* ---------------- catalog clean-up ---------------- */
   /** Everything in the thumbnail store that the catalog still refers to: previews, LUTs, mask shapes (also those only an undo step or a snapshot names). */
   function storeKeys() {
@@ -930,27 +1025,40 @@
   function printDialog() {
     const ts = targets().filter(p => !p.missing);
     if (!ts.length) return UI.toast('Select photos to print', 'circle-info');
-    const o = Object.assign({ cols: ts.length === 1 ? 1 : 5, names: true, dates: false, title: '' }, Cat.pref('print.last', {}));
+    const o = Object.assign({ cols: ts.length === 1 ? 1 : 5, names: true, dates: false, title: '', paper: '', landscape: false, margin: 10, fill: false }, Cat.pref('print.last', {}));
     if (ts.length === 1) o.cols = 1;
     const cols = h('select', null, [[1, 'One photo per page'], [2, '2 across'], [3, '3 across'], [4, '4 across'], [5, '5 across'], [6, '6 across'], [8, '8 across']].map(([v, l]) => h('option', { value: v }, l)));
     cols.value = String(o.cols);
     const title = h('input', { type: 'text', value: o.title, placeholder: 'Optional heading', style: { width: '100%' } });
     const names = UI.checkbox('File names', o.names, (v) => { o.names = v; }), dates = UI.checkbox('Capture dates', o.dates, (v) => { o.dates = v; });
+    const paper = h('select', null, [['', 'As set in the printer dialog'], ['A4', 'A4'], ['A3', 'A3'], ['letter', 'Letter'], ['legal', 'Legal'], ['4in 6in', '4 × 6 in'], ['5in 7in', '5 × 7 in'], ['8in 10in', '8 × 10 in'], ['13in 19in', '13 × 19 in']].map(([v, l]) => h('option', { value: v }, l)));
+    paper.value = o.paper;
+    const land = UI.checkbox('Landscape', o.landscape, (v) => { o.landscape = v; }), fill = UI.checkbox('Fill the page (crops the photo’s edges)', o.fill, (v) => { o.fill = v; });
+    const margin = h('input', { type: 'number', value: o.margin, min: 0, max: 50, style: { width: '70px' } });
+    const single = h('div', null, fill.el);
+    const sync = () => { single.style.display = cols.value === '1' ? '' : 'none'; margin.disabled = !paper.value; land.input.disabled = !paper.value; };
+    cols.addEventListener('change', sync); paper.addEventListener('change', sync); sync();
     UI.modal({
       title: `Print ${ts.length} photo${ts.length === 1 ? '' : 's'}`, icon: 'print',
       body: h('div', null,
         h('label', { class: 'field' }, h('span', null, 'Layout'), cols),
+        single,
+        h('label', { class: 'field' }, h('span', null, 'Paper'), paper),
+        h('div', { class: 'row', style: { gap: '14px', alignItems: 'center' } }, land.el, h('label', null, 'Margins ', margin, ' mm')),
         h('label', { class: 'field' }, h('span', null, 'Heading'), title),
         h('div', { class: 'row', style: { gap: '14px' } }, names.el, dates.el),
-        h('p', { class: 'muted', style: { fontSize: '11px', marginTop: '10px' } }, 'Paper size, margins and the printer (or “Save as PDF”) are chosen in the print dialog that opens next.')),
-      buttons: [{ label: 'Cancel' }, { label: 'Print…', primary: true, onClick: () => { o.cols = +cols.value; o.title = title.value.trim(); Cat.setPref('print.last', o); printSheet(ts, o); } }]
+        h('p', { class: 'muted', style: { fontSize: '11px', marginTop: '10px' } }, 'With a paper size chosen here, the page is laid out for it with these margins (pick the same paper in the printer dialog). The printer, or “Save as PDF”, is chosen in the dialog that opens next.')),
+      buttons: [{ label: 'Cancel' }, { label: 'Print…', primary: true, onClick: () => { o.cols = +cols.value; o.title = title.value.trim(); o.paper = paper.value; o.margin = Math.max(0, Math.min(50, +margin.value || 0)); Cat.setPref('print.last', o); printSheet(ts, o); } }]
     });
   }
   async function printSheet(ts, o) {
     UI.activity('Preparing the print…', 0);
     const old = document.getElementById('print-root'); if (old) old.remove();
     const sheet = h('div', { class: 'sheet', style: { gridTemplateColumns: `repeat(${o.cols}, 1fr)` } });
-    const root = h('div', { id: 'print-root' }, o.title ? h('h1', null, o.title) : null, sheet);
+    const root = h('div', { id: 'print-root', class: o.cols === 1 ? (o.fill ? 'single fill' : 'single') : '' }, o.title ? h('h1', null, o.title) : null, sheet);
+    // the page itself: a chosen paper size, its orientation and margins
+    const oldPage = document.getElementById('print-page'); if (oldPage) oldPage.remove();
+    if (o.paper) document.head.appendChild(h('style', { id: 'print-page' }, `@page { size: ${o.paper}${o.landscape ? ' landscape' : ''}; margin: ${o.margin}mm; }`));
     // small cells print from the thumbnails; larger ones from a rendered preview so they stay sharp on paper
     const level = o.cols <= 2 ? 'proxy' : o.cols <= 4 ? 'draft' : null;
     const loads = [];
@@ -1048,6 +1156,7 @@
       { label: 'Paste settings', icon: 'paste', key: 'Ctrl+Shift+V', disabled: !clipboard, action: () => pasteSettings() },
       { label: 'Sync settings…', icon: 'arrows-rotate', disabled: n < 2, action: () => syncSettings() },
       '-',
+      { label: 'Rename or move…', icon: 'file-pen', hidden: !API.moveFile, action: () => batchRename() },
       { label: 'Merge to HDR…', icon: 'layer-group', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('hdr') },
       { label: 'Merge to HDR (editable DNG)…', icon: 'layer-group', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('hdrDng') },
       { label: 'Merge to Panorama…', icon: 'panorama', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('pano') },
@@ -1202,6 +1311,13 @@
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
         row('Develop JPEG XL DNG files (experimental)', 'Galaxy S23 and later store RAW as JPEG XL inside the DNG. On: developed from that data (about half a minute per photo; flatter than the camera JPEG, faint rings can show in skies). Off: the embedded preview is used.', chk('raw.jxlDng', false)),
         row('Wide colour for new photos', 'RAW photos and photos saved in Display P3 (most phones) that are added from now on are edited in Display P3. Each photo can be switched in Develop → Calibration.', chk('raw.wide', true)),
+        ...(API.watchFolder ? [row('Watched folder', 'Photos that appear in this folder (and the folders inside it) are added to the catalog by themselves: a card reader, a phone sync, a tethering program.', (() => {
+          const cur = Cat.pref('import.watch', ''), lab = h('span', { class: 'muted small', style: { marginRight: '8px' } }, cur || 'none');
+          return h('span', null, lab,
+            h('button', { class: 'btn sm', onclick: async () => { const d = await API.chooseDirectory(Cat.pref('import.watch', '')); if (!d) return; try { await API.watchFolder(d); Cat.setPref('import.watch', d); lab.textContent = d; UI.toast('Watching ' + d, 'folder-open'); } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); } } }, 'Choose…'),
+            h('button', { class: 'btn sm', style: { marginLeft: '4px' }, onclick: async () => { await API.watchFolder(''); Cat.setPref('import.watch', ''); lab.textContent = 'none'; } }, 'Stop'));
+        })())] : []),
+        ...(API.listBackups ? [row('Catalog backups', 'A copy of the catalog is kept every day; restore one, or make one now.', h('button', { class: 'btn sm', onclick: () => catalogBackups() }, 'Backups…'))] : []),
         ...(API.cleanStore ? [row('Catalog clean-up', 'Remove previews, mask shapes and filled pieces that nothing in the catalog uses any more.', h('button', { class: 'btn sm', onclick: () => cleanCatalog() }, 'Clean up…'))] : []),
         row('Look for faces in new photos', 'Photos are looked through for faces as they are imported, on this computer. Turns itself on the first time you use People → Find faces.', chk('faces.auto', false)),
         h('h4', null, 'Import'),
@@ -1351,6 +1467,7 @@
     autoTone: () => module === 'develop' ? develop.autoTone() : autoToneSelection(),
     lensProfile: lensProfileSelection,
     compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
+    catalogBackups, batchRename,
     mergeHdr: () => mergePhotos('hdr'), mergeHdrDng: () => mergePhotos('hdrDng'), mergePano: () => mergePhotos('pano'),
     toggleFaces: async () => {
       if (!PJ.Faces) return;
@@ -1541,6 +1658,12 @@
           h('p', { class: 'muted' }, 'Your photo files are not copied or moved; both read them where they are. To stay with one catalog, use only one of the two installations.')),
         buttons: [{ label: 'OK', primary: true }]
       });
+    }
+    // the watched folder: start watching again, and take in what arrives
+    if (API.watchFolder) {
+      API.onWatchFiles(async (m) => { try { const r = await API.scanPaths(m.paths || []); const d = Array.isArray(r) ? r : (r && r.files) || []; if (d.length) await importDescs(d, true); } catch (e) { console.warn('watched folder:', e && e.message); } });
+      const wf = Cat.pref('import.watch', '');
+      if (wf) API.watchFolder(wf).catch((e) => UI.toast('The watched folder is not available: ' + (e.message || e), 'triangle-exclamation'));
     }
     API.onFlush(async () => {
       // exports still running: closing would cut them off, so ask first

@@ -85,6 +85,10 @@
       saveThumb: (id, bytes) => call('saveThumb', { id, data: b64(bytes) }),
       deleteThumb: (id) => call('deleteThumb', { id }),
       cleanStore: (keep, remove, raw) => call('cleanStore', { keep, remove: !!remove, raw: !!raw }),
+      // the Windows shell only, so far: catalog backups, renaming / moving originals, a watched folder
+      listBackups: WIN ? () => call('listBackups') : null, backupNow: WIN ? () => call('backupNow') : null, restoreBackup: WIN ? (name) => call('restoreBackup', { name }) : null,
+      moveFile: WIN ? (path, dest, name) => call('moveFile', { path, dest: dest || '', name }) : null,
+      watchFolder: WIN ? (path) => call('watchFolder', { path: path || '' }) : null, onWatchFiles: (cb) => on('watchFiles', cb),
       modelStatus: WIN ? () => call('modelStatus') : null, modelFetch: WIN ? (name) => call('modelFetch', { name }) : null, onModelProgress: (cb) => on('modelProgress', cb),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,
