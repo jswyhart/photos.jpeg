@@ -11,6 +11,7 @@
 param(
     [switch]$Lite,
     [switch]$NoBuild,
+    [switch]$KeepLayout,                                    # leave build\store-layout in place (to try the package on this PC, see README)
     [ValidateSet('x64', 'arm64')][string]$Arch = 'x64'
 )
 $ErrorActionPreference = 'Stop'
@@ -73,5 +74,5 @@ $msix = Join-Path $PSScriptRoot ("build\photos.jpeg-$four-$Arch" + $(if ($Lite) 
 if (Test-Path $msix) { Remove-Item $msix -Force }
 & $makeappx.FullName pack /d $layout /p $msix /o | Select-Object -Last 4
 if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
-Remove-Item $layout -Recurse -Force
+if (-not $KeepLayout) { Remove-Item $layout -Recurse -Force }
 Write-Host ("Store package {0}  ({1:N0} MB) - unsigned; upload it in Partner Center" -f $msix, ((Get-Item $msix).Length / 1MB))
