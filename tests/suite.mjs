@@ -499,6 +499,48 @@ test('fill takes each part of a hole from material of its own kind', async () =>
   return `${(r.wrong * 100).toFixed(1)}% of the filled area took material from the wrong side`;
 });
 
+test('fisheye correction: same on both renderers, points map there and back; Adobe RGB soft proof', async () => {
+  const r = await page(async () => {
+    const P = PJ.Pipeline, E = PJ.Engine, Cat = PJ.Catalog, p = Cat.state.photos.find(x => x.name === 'building.jpg');
+    await E.ensureSource(p, 'best');
+    const s = P.defaultSettings(); s.lens.fisheye = 70;
+    const c = await E.render(p, s, 'proxy', {}, 0), g = E.renderGPU(p, s, {});
+    let sum = 0, n = 0;
+    if (g && g.width === c.width) { const gd = g.canvas.getContext('2d').getImageData(0, 0, g.width, g.height, { colorSpace: 'srgb' }).data; for (let i = 0; i < gd.length; i += 4) { sum += Math.abs(gd[i] - c.data[i]) + Math.abs(gd[i + 1] - c.data[i + 1]) + Math.abs(gd[i + 2] - c.data[i + 2]); n += 3; } }
+    const geo = P.buildGeometry(P.normalizeSettings(s), c.levelWidth, c.levelHeight), q = geo.toOutput(c.levelWidth * 0.2, c.levelHeight * 0.8), back = geo.toSource(q[0], q[1], [0, 0]);
+    const plain = P.buildGeometry(P.normalizeSettings(P.defaultSettings()), c.levelWidth, c.levelHeight).toOutput(c.levelWidth * 0.2, c.levelHeight * 0.8);
+    // soft proof for Adobe RGB: a moderate green that Adobe RGB holds is left alone, a P3 red it cannot hold is marked
+    const src = new Uint8ClampedArray(2 * 4); src.set([90, 170, 110, 255], 0); src.set([255, 20, 20, 255], 4);
+    const proof = P.render({ src: { data: src, width: 2, height: 1 }, settings: P.defaultSettings(), fullLongEdge: 2, seed: 1, opts: { srcInput: { space: 'p3' }, wide: true, outSpace: 'p3', gamutWarn: 'adobe' } });
+    return { gpu: n ? sum / n : -1, trip: Math.hypot(back[0] - c.levelWidth * 0.2, back[1] - c.levelHeight * 0.8), moved: Math.hypot(q[0] - plain[0], q[1] - plain[1]), green: Array.from(proof.data.slice(0, 3)), red: Array.from(proof.data.slice(4, 7)), space: proof.space };
+  });
+  assert(r.gpu >= 0 && r.gpu < 1.5, `GPU and CPU differ by ${r.gpu}`);
+  assert(r.trip < 0.05 && r.moved > 5, JSON.stringify(r));
+  assert(r.space === 'p3' && r.green.join() === '90,170,110' && r.red.join() === '255,0,255', 'Adobe RGB proof: ' + JSON.stringify(r));
+});
+
+test('HDR merge can keep the full range: linear data with headroom and a preview', async () => {
+  const r = await page(async () => {
+    const w = 320, h = 200, shot = (e) => { const rgb = new Uint8Array(w * h * 3); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const L = (x < 160 ? 0.04 : 2.5) * (0.6 + 0.4 * (((x >> 3) + (y >> 3)) & 1)); for (let c = 0; c < 3; c++) rgb[(y * w + x) * 3 + c] = Math.max(0, Math.min(255, 255 * Math.pow(L * e, 1 / 2.2))); } return { w, h, rgb }; };
+    const wk = new Worker(new URL('js/mergeworker.js', location.href).href);
+    const out = await new Promise((res, rej) => {
+      wk.onmessage = (e) => { if (e.data.progress != null) return; e.data.error ? rej(new Error(e.data.error)) : res(e.data); };
+      wk.postMessage({ op: 'reset' }); for (const e of [0.2, 1, 5]) { const im = shot(e); wk.postMessage({ op: 'image', w, h, rgb: im.rgb }); }
+      wk.postMessage({ op: 'hdr', id: 1, linear: true });
+    });
+    wk.terminate();
+    const at = (x, y) => out.rgb16[(y * w + x) * 3 + 1], H = out.stats.headroom;
+    // the bright half is blown in the middle frame (2.5 > 1) but must come out near 2.5 and 1.5 in the merged light, in units of the middle frame's white
+    const light = (x, y) => at(x, y) / 65535 * H;
+    return { headroom: H, gains: out.stats.gains, brightA: light(244, 100), brightB: light(252, 100), dark: light(40, 100), preview: out.preview && [out.preview.w, out.preview.h, out.preview.rgb.length] };
+  });
+  assert(r.headroom > 3 && r.headroom < 8, 'headroom ' + r.headroom);
+  const hi = Math.max(r.brightA, r.brightB), lo = Math.min(r.brightA, r.brightB);
+  assert(hi > 1.6 && hi < 3.4 && lo > 1 && hi / lo > 1.3, `the blown area did not come back with its detail: ${r.brightA.toFixed(2)}, ${r.brightB.toFixed(2)}`);
+  assert(r.dark > 0.01 && r.dark < 0.08 && r.preview && r.preview[2] === r.preview[0] * r.preview[1] * 3, JSON.stringify(r));
+  return `highlights at ${hi.toFixed(1)}× and ${lo.toFixed(1)}× the middle frame's white are kept (headroom ${r.headroom.toFixed(1)}×)`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));
