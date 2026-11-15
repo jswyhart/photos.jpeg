@@ -1396,7 +1396,7 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn, check) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn, check, cube, cubeN) {
     if (check) gamutTables();
     if (conv) gamutTables();
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
@@ -1412,6 +1412,14 @@
       for (let k = 0; k < outw; k++, si++, di += 4) {
         let x = R[si], y = G[si], z = B[si];
         let outside = false;
+        if (cube) {
+          // soft proof for a printer: the profile's cube over the working colours says what the printer cannot hold
+          const fx = (x <= 0 ? 0 : x >= 1 ? 1 : x) * (cubeN - 1), fy = (y <= 0 ? 0 : y >= 1 ? 1 : y) * (cubeN - 1), fz = (z <= 0 ? 0 : z >= 1 ? 1 : z) * (cubeN - 1);
+          const ix = Math.min(cubeN - 2, fx | 0), iy = Math.min(cubeN - 2, fy | 0), iz = Math.min(cubeN - 2, fz | 0), tx = fx - ix, ty = fy - iy, tz = fz - iz;
+          const o0 = (iz * cubeN + iy) * cubeN + ix, o1 = o0 + cubeN, o2 = o0 + cubeN * cubeN, o3 = o2 + cubeN;
+          const v = ((cube[o0] * (1 - tx) + cube[o0 + 1] * tx) * (1 - ty) + (cube[o1] * (1 - tx) + cube[o1 + 1] * tx) * ty) * (1 - tz) + ((cube[o2] * (1 - tx) + cube[o2 + 1] * tx) * (1 - ty) + (cube[o3] * (1 - tx) + cube[o3 + 1] * tx) * ty) * tz;
+          if (v >= 0.5) outside = true;
+        }
         if (check) {
           // soft proof for a space the screen is not narrowed to (Adobe RGB): the picture stays as it is, what that space cannot hold is marked
           const lr = fLin(x), lg = fLin(y), lb = fLin(z);
@@ -1565,7 +1573,8 @@
     // 8. Output
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
-    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn, wide && opts.outSpace === 'p3' && opts.gamutWarn === 'adobe' ? P3_TO_ADOBE : null);
+    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn, wide && opts.outSpace === 'p3' && opts.gamutWarn === 'adobe' ? P3_TO_ADOBE : null,
+      opts.gamutCube ? (wide ? opts.gamutCube.p3 : opts.gamutCube.srgb) : null, opts.gamutCube ? opts.gamutCube.n : 0);
     return {
       space: wide && opts.outSpace === 'p3' ? 'p3' : 'srgb',
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,

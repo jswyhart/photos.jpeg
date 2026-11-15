@@ -742,26 +742,55 @@
     const wideChk = UI.checkbox('Wide colour (Display P3)', false, (v) => {
       if (!photo) return;
       if (v) photo.wide = true; else delete photo.wide;
-      proofRow.style.display = v ? '' : 'none';
+      proofWide = !!v; fillProof();
       Cat.scheduleSave();
       viewer.update('commit'); E.queueThumb(photo, true);
       UI.toast(v ? 'Edited in Display P3: colours beyond sRGB are kept for wide-colour screens and exports' : 'Edited in sRGB', 'palette');
     });
     const wideRow = h('div', { class: 'wide-row', title: 'For RAW photos and photos saved in Display P3 (most phones). Keeps the colours recorded beyond sRGB. Turning it on or off can shift strongly saturated colours slightly.' }, wideChk.el);
-    const proofSel = h('select', { title: 'Only changes what you see here, not the photo' },
-      h('option', { value: '' }, 'Soft proof: off'), h('option', { value: 'srgb' }, 'Soft proof: sRGB'), h('option', { value: 'adobe' }, 'Soft proof: Adobe RGB'));
+    const proofSel = h('select', { title: 'Only changes what you see here, not the photo' });
+    let proofWide = false;
+    const fillProof = () => {
+      const cur = viewer.st.proof || '';
+      proofSel.replaceChildren(h('option', { value: '' }, 'Soft proof: off'),
+        ...(proofWide ? [h('option', { value: 'srgb' }, 'Soft proof: sRGB'), h('option', { value: 'adobe' }, 'Soft proof: Adobe RGB')] : []),
+        ...(PJ.Proof ? PJ.Proof.list().map(p => h('option', { value: p.id }, 'Soft proof: ' + p.name)) : []),
+        ...(PJ.Proof ? [h('option', { value: '+' }, 'Load a printer profile…')] : []),
+        ...(PJ.Proof && PJ.Proof.list().some(p => p.id === cur) ? [h('option', { value: '-' }, 'Forget this printer profile')] : []));
+      proofSel.value = [...proofSel.options].some(o => o.value === cur) ? cur : '';
+      if (proofSel.value !== cur) viewer.st.proof = false;
+    };
+    const setProof = async (v) => {
+      if (v && v !== 'srgb' && v !== 'adobe') { UI.activity('Reading the printer profile…', null); try { if (!(await PJ.Proof.get(v))) v = ''; } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); v = ''; } UI.activity(''); }
+      viewer.st.proof = v || false; fillProof(); viewer.update('commit');
+      if (v === 'srgb') UI.toast('Showing the photo as an sRGB file or screen will; colours sRGB cannot hold are marked in magenta', 'eye');
+      else if (v === 'adobe') UI.toast('Colours an Adobe RGB export cannot hold are marked in magenta', 'eye');
+      else if (v) UI.toast('Colours this printer and paper cannot hold are marked in magenta', 'eye');
+    };
     proofSel.addEventListener('change', () => {
-      viewer.st.proof = proofSel.value || false; viewer.update('commit');
-      if (proofSel.value === 'srgb') UI.toast('Showing the photo as an sRGB file or screen will; colours sRGB cannot hold are marked in magenta', 'eye');
-      if (proofSel.value === 'adobe') UI.toast('Colours an Adobe RGB export cannot hold are marked in magenta', 'eye');
+      const v = proofSel.value;
+      if (v === '-') { PJ.Proof.remove(viewer.st.proof); return setProof(''); }
+      if (v !== '+') return setProof(v);
+      // a printer or paper profile (.icc / .icm) from disk
+      const inp = h('input', { type: 'file', accept: '.icc,.icm' });
+      inp.addEventListener('change', async () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return fillProof();
+        try { const r = await PJ.Proof.add(new Uint8Array(await f.arrayBuffer()), f.name); await setProof(r.id); }
+        catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); fillProof(); }
+      });
+      inp.addEventListener('cancel', fillProof);
+      inp.click();
     });
-    const proofChk = { set: (v) => { proofSel.value = v || ''; } };
+    const proofChk = { set: () => fillProof() };
     const proofRow = h('div', { class: 'wide-row' }, proofSel);
     const hasP3 = () => { const src = photo && E.cachedSource(photo); return !!(photo && photo.kind !== 'video' && (photo.isRaw || (src && src.input && src.input.space === 'p3'))); };
     controls.push({ sync: () => {
       const on = hasP3();
       wideRow.style.display = on ? '' : 'none'; wideChk.set(!!(photo && photo.wide));
-      proofRow.style.display = on && photo.wide ? '' : 'none'; proofChk.set(viewer.st.proof);
+      // sRGB and Adobe RGB proofs are for wide-colour photos; a printer proof is for any photo
+      proofWide = !!(on && photo.wide);
+      proofRow.style.display = photo && photo.kind !== 'video' && (proofWide || PJ.Proof) ? '' : 'none'; proofChk.set(viewer.st.proof);
     } });
     calPanel.body.append(
       wideRow, proofRow,

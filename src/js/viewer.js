@@ -113,7 +113,8 @@
     function renderOpts(extra) {
       // soft proof: the picture as an sRGB file or screen will show it, with what sRGB cannot hold marked
       const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS && st.proof !== 'srgb' ? 'p3' : 'srgb' };
-      if (st.proof) o.gamutWarn = st.proof;                 // 'srgb' | 'adobe'
+      if (st.proof === 'srgb' || st.proof === 'adobe') o.gamutWarn = st.proof;
+      else if (st.proof && PJ.Proof) { const t = PJ.Proof.getSync(st.proof); if (t) o.gamutCube = t; }      // a printer profile's id
       if (st.tool === 'crop') {
         const s = srcInfo();
         // crop override must be expressed for the level being rendered; normalized so identical

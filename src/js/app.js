@@ -952,6 +952,7 @@
       for (const e of p.snapshots || []) masksOf(e.settings);
     }
     for (const l of Cat.state.luts || []) keep.add(l.id);
+    if (PJ.Proof) for (const pr of PJ.Proof.list()) keep.add(PJ.Proof.key(pr.id));
     for (const pr of Cat.state.presets || []) masksOf(pr.settings);
     if (clipboard) masksOf(clipboard.partial);
     return [...keep];

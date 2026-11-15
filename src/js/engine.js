@@ -579,7 +579,7 @@
       if (src.input) { o.srcInput = src.input; o.wide = !!photo.wide; }
       if (s.lut.id && PJ.LUTs) { o.cube = PJ.LUTs.getSync(s.lut.id); if (!o.cube) { PJ.LUTs.get(s.lut.id); return null; } }
       const wide = P.isWide(s, o);
-      if (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0) || o.gamutWarn)) return null;   // a look in wide colour, or no P3 canvas: the CPU render does it
+      if (o.gamutCube || (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0) || o.gamutWarn))) return null;   // a look in wide colour, or no P3 canvas: the CPU render does it
       const r = gpu.render(s, o);
       // The frame stays on the GPU: copying it into a plain canvas needs no readback, so live
       // drags can keep up with the display's refresh rate.
