@@ -238,7 +238,7 @@
    * a second. The full-resolution image is developed again only when it is needed (1:1, export).
    * The key covers the file's identity and the engine version, so a changed file or a newer
    * develop engine never gets a stale image. */
-  const RAW_CACHE_VERSION = 'r2';   // r2: developed pixels are in Display P3 primaries
+  const RAW_CACHE_VERSION = 'r3';   // r2: developed pixels are in Display P3 primaries; r3: finer shadow encoding
   const rawCacheKey = (photo) => [RAW_CACHE_VERSION, photo.path, photo.size || 0, Math.round(photo.mtime || 0), PROXY_EDGE].join('|');
   async function readRawCache(photo) {
     if (!API.rawCache || !photo.exifLoaded || !photo.width) return null;

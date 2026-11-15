@@ -585,7 +585,8 @@
   }
   function linearRawCells(info, gw, gh) {
     const { W, crop, linearRaw } = info, spp = linearRaw.spp;
-    const out = new Float32Array(gw * gh * 4), scale = 1 / Math.max(1, info.white - info.black);
+    // (a file that stores its picture dark and says by how much — BaselineExposure — is lifted by that, as in develop())
+    const out = new Float32Array(gw * gh * 4), scale = Math.pow(2, Math.max(0, Math.min(4, info.baselineExp || 0))) / Math.max(1, info.white - info.black);
     for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
       const s = [0, 0, 0]; let n = 0, clip = 0;
       for (let k = 0; k < 16; k++) {
@@ -626,8 +627,10 @@
     const encode = (v) => {
       // scene-linear 0…16 → 8-bit rawlog with a little dither against banding
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      const f = v <= 0 ? 0 : v >= 16 ? LUTN : v / 16 * LUTN;
-      const q = enc[f | 0] + (seed / 0x7fffffff - 0.5);
+      // (read between the table's entries: in deep shadows one entry spans several per cent of brightness,
+      //  and stepping from entry to entry drew contour lines across smooth skies)
+      const f = v <= 0 ? 0 : v >= 16 ? LUTN : v / 16 * LUTN, fi = f | 0;
+      const q = (fi >= LUTN ? enc[LUTN] : enc[fi] + (enc[fi + 1] - enc[fi]) * (f - fi)) + (seed / 0x7fffffff - 0.5);
       return q < 0 ? 0 : q > 255 ? 255 : q + 0.5;
     };
     const m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3], m4 = m[4], m5 = m[5], m6 = m[6], m7 = m[7], m8 = m[8];
@@ -645,9 +648,11 @@
 
     if (info.linearRaw) {
       const { data, spp } = info.linearRaw;
+      // phones store these pictures dark, with room above for highlights, and say by how much (BaselineExposure)
+      const lift = Math.pow(2, Math.max(0, Math.min(4, info.baselineExp || 0))), g0 = g[0] * lift, g1 = g[1] * lift, g2 = g[2] * lift;
       for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
         const sx = crop.x + (half ? x * 2 : x), sy = crop.y + (half ? y * 2 : y), i = (sy * W + sx) * spp;
-        const r = Math.max(0, data[i] - info.black) * g[0], gg = Math.max(0, data[i + 1] - info.black) * g[1], b = Math.max(0, data[i + 2] - info.black) * g[2];
+        const r = Math.max(0, data[i] - info.black) * g0, gg = Math.max(0, data[i + 1] - info.black) * g1, b = Math.max(0, data[i + 2] - info.black) * g2;
         const clipped = data[i] >= info.white || data[i + 1] >= info.white || data[i + 2] >= info.white;
         emit((y * ow + x) * 4, Math.min(r, clipAt[0]), Math.min(gg, clipAt[1]), Math.min(b, clipAt[2]), clipped);
       }
