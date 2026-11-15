@@ -223,12 +223,14 @@ test('Sky mask: found, stored outside the settings, same on both renderers', asy
     if (g) { const t = document.createElement('canvas'); t.width = g.width; t.height = g.height; const x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(g.canvas, 0, 0); gp = x.getImageData(0, 0, g.width, g.height).data; }
     for (let i = 0; i < c.data.length; i += 44) { n++; if (Math.abs(c.data[i] - plain.data[i]) > 8) changed++; if (gp) diff += Math.abs(c.data[i] - gp[i]) + Math.abs(c.data[i + 1] - gp[i + 1]) + Math.abs(c.data[i + 2] - gp[i + 2]); }
     const disk = await fetch(PJ.API.thumbUrl('mm_' + fields.map.id, 1));
-    return { cover: sum / map.data.length / 255, top: top / (map.data.length * 0.1) / 255, bottom: bottom / (map.data.length * 0.1) / 255, settingsBytes: JSON.stringify(s.masks).length, darkened: changed / n, gpuDiff: gp ? diff / n / 3 : null, onDisk: disk.ok };
+    const centre = map.data[(map.h >> 1) * map.w + (map.w >> 1)] / 255;
+    return { centre, cover: sum / map.data.length / 255, top: top / (map.data.length * 0.1) / 255, bottom: bottom / (map.data.length * 0.1) / 255, settingsBytes: JSON.stringify(s.masks).length, darkened: changed / n, gpuDiff: gp ? diff / n / 3 : null, onDisk: disk.ok };
   });
   if (r.skipped) return 'skipped';
   assert(!r.error, r.error);
   assert(r.cover > 0.1 && r.cover < 0.7, `sky covers ${(r.cover * 100).toFixed(0)}% of the building picture`);
-  assert(r.top > 0.8 && r.bottom < 0.2, `sky should be at the top (top ${r.top.toFixed(2)}, bottom ${r.bottom.toFixed(2)})`);
+  // the test picture is a building against a plain sky: sky along the top and down both sides, none on the building
+  assert(r.top > 0.8 && r.centre < 0.2, `sky should be along the top and not on the building (top ${r.top.toFixed(2)}, middle ${r.centre.toFixed(2)})`);
   assert(r.settingsBytes < 2000, `the mask adds ${r.settingsBytes} bytes to the settings`);
   assert(r.darkened > 0.08, 'the mask had no effect on the render'); assert(r.onDisk, 'the mask map was not stored');
   if (r.gpuDiff !== null) assert(r.gpuDiff < 1.5, `renderers differ by ${r.gpuDiff.toFixed(2)}`);
