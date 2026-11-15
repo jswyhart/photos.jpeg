@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- photos.jpeg for Windows: a native .NET app that hosts the shared editor (../src) in the
+       system WebView2 control. No Electron, no Node. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>photos.jpeg</AssemblyName>
+    <RootNamespace>PhotosJpeg</RootNamespace>
+    <Product>photos.jpeg</Product>
+    <Company>photos.jpeg</Company>
+    <Description>RAW photo &amp; video editor</Description>
+    <Version>2.0.0</Version>
+    <!-- Address of the update manifest (see Updater.cs). Empty: the app never checks for updates. -->
+    <UpdateUrl></UpdateUrl>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);WFO5001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <AssemblyMetadata Include="UpdateUrl" Value="$(UpdateUrl)" />
+    <!-- installer\ is its own project (the Setup program) -->
+    <Compile Remove="installer\**" />
+    <None Remove="installer\**" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+
+  <!-- The shared editor is copied next to the exe as web\ -->
+  <ItemGroup>
+    <Content Include="..\src\**\*" Link="web\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Optional helpers: drop ffmpeg.exe and/or pj-braw.exe into windows\tools to bundle them -->
+    <Content Include="tools\*.exe" Link="tools\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="tools\*.txt" Link="tools\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\tools\braw\build\pj-braw.exe" Link="tools\pj-braw.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\tools\braw\build\pj-braw.exe')" />
+  </ItemGroup>
+
+</Project>

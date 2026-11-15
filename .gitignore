@@ -1,0 +1,14 @@
+.DS_Store
+mac/build/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+.idea/
+windows/bin/
+windows/obj/
+windows/build/
+windows/tools/*.exe
+windows/installer/bin/
+windows/installer/obj/

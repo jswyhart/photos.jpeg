@@ -1,0 +1,2 @@
+# Keep files exactly as they are on disk (the Mac and Android build scripts need LF line endings)
+* -text

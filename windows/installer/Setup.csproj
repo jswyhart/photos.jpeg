@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- photos.jpeg Setup: a small installer / uninstaller. It targets .NET Framework 4.8, which is
+       part of Windows 10 and 11, so the setup program itself needs nothing installed.
+       build.ps1 -Installer appends the zipped app to this exe. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>photos.jpeg-setup</AssemblyName>
+    <RootNamespace>PhotosJpeg.Setup</RootNamespace>
+    <Product>photos.jpeg</Product>
+    <Company>photos.jpeg</Company>
+    <Description>photos.jpeg Setup</Description>
+    <Version>2.0.0</Version>
+    <ApplicationIcon>..\icon.ico</ApplicationIcon>
+    <ApplicationManifest>setup.manifest</ApplicationManifest>
+    <Prefer32Bit>false</Prefer32Bit>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+</Project>
