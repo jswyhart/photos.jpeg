@@ -441,12 +441,62 @@ test('HDR merge keeps both ends of the scene; a panorama joins overlapping photo
     let refused = '';
     try { await run('pano', [shot(0, 300, 260, 1), { w: 300, h: 260, rgb: new Uint8Array(300 * 260 * 3).fill(90) }], { focal: [0, 0], maxPixels: 4e6 }); } catch (e) { refused = e.message; }
     wk.terminate();
-    return { hdrClip: clipped(hdr.rgb16, 65535, 400 * 260), single: ex.map(im => clipped(im.rgb, 255, 400 * 260)), pano: [pano.w, pano.h], stats: pano.stats, refused };
+    return { align: hdr.stats.align, ghost: hdr.stats.ghost, hdrClip: clipped(hdr.rgb16, 65535, 400 * 260), single: ex.map(im => clipped(im.rgb, 255, 400 * 260)), pano: [pano.w, pano.h], stats: pano.stats, refused };
   });
   assert(r.hdrClip < 0.12 && Math.min(...r.single) > r.hdrClip * 2, `merged ${r.hdrClip}, single exposures ${r.single}`);
+  assert(r.align.length === 3 && r.align.includes('reference') && r.ghost.every(g => g < 0.05), 'HDR alignment: ' + JSON.stringify(r.align) + JSON.stringify(r.ghost));
   assert(r.pano[0] > 480 && r.pano[0] < 700 && r.stats.matches.every(m => m >= 10) && r.stats.overlapDiff < 6, JSON.stringify(r.pano) + JSON.stringify(r.stats));
   assert(/do not overlap/.test(r.refused), 'photos that do not overlap were joined anyway');
   return `HDR: ${(r.hdrClip * 100).toFixed(1)}% clipped against ${(Math.min(...r.single) * 100).toFixed(0)}% in the best single exposure; panorama ${r.pano[0]} × ${r.pano[1]} from three 300-wide photos`;
+});
+
+test('Display P3 pictures: narrowed for an sRGB edit, kept for a wide one; soft proof marks what sRGB cannot hold', async () => {
+  const r = await page(() => {
+    const P = PJ.Pipeline, w = 8, h = 8, src = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) { const c = i % 2 ? [250, 20, 20] : [120, 130, 110]; src.set([c[0], c[1], c[2], 255], i * 4); }
+    const go = (opts) => P.render({ src: { data: src, width: w, height: h }, settings: P.defaultSettings(), fullLongEdge: w, seed: 1, opts: Object.assign({ srcInput: { space: 'p3' } }, opts) });
+    const std = go({}), wide = go({ wide: true, outSpace: 'p3' }), proof = go({ wide: true, gamutWarn: true });
+    const ref = src.slice(); PJ.ICC.convert(ref, 'srgb', 4, 255, 'p3');
+    const diff = (a, b) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Math.abs(a[i] - b[i])); return m; };
+    const mag = (d, i) => d[i * 4] === 255 && d[i * 4 + 1] === 0 && d[i * 4 + 2] === 255;
+    return { std: diff(std.data, ref), wide: diff(wide.data, src), spaces: std.space + '/' + wide.space + '/' + proof.space, redMarked: mag(proof.data, 1), greyMarked: mag(proof.data, 0), counted: proof.clip.out };
+  });
+  assert(r.std <= 1 && r.wide === 0 && r.spaces === 'srgb/p3/srgb', JSON.stringify(r));
+  assert(r.redMarked && !r.greyMarked && r.counted === 32, 'soft proof marking: ' + JSON.stringify(r));
+});
+
+test('JPEG XL exports carry EXIF; a JPEG XL picture inside a DNG is found', async () => {
+  const r = await page(() => {
+    const X = PJ.Exporter, app1 = Uint8Array.from([0xff, 0xe1, 0, 16, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x49, 0x49, 0x2a, 0, 8, 0, 0, 0]);
+    const out = X.jxlWithExif(Uint8Array.from([0xff, 0x0a, 1, 2, 3]), app1), s = String.fromCharCode(...out);
+    const same = X.jxlWithExif(Uint8Array.from([0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20]), app1).length;
+    // a minimal DNG-like file: one IFD with a 3-sample, JPEG XL compressed, single-strip image
+    const b = new Uint8Array(400), dv = new DataView(b.buffer); b[0] = b[1] = 0x49; dv.setUint16(2, 42, true); dv.setUint32(4, 8, true);
+    const tags = [[254, 4, 1, 0], [256, 4, 1, 640], [257, 4, 1, 480], [259, 3, 1, 52546], [262, 3, 1, 34892], [273, 4, 1, 300], [277, 3, 1, 3], [279, 4, 1, 100]];
+    dv.setUint16(8, tags.length, true);
+    tags.forEach(([t, ty, n, v], i) => { const e = 10 + i * 12; dv.setUint16(e, t, true); dv.setUint16(e + 2, ty, true); dv.setUint32(e + 4, n, true); if (ty === 3) dv.setUint16(e + 8, v, true); else dv.setUint32(e + 8, v, true); });
+    const found = PJ.Raw.jxlInDng(b); dv.setUint16(10 + 3 * 12 + 8, 7, true);
+    return { head: Array.from(out.slice(0, 12)), exifAt: s.indexOf('Exif'), tiffAfter: s.indexOf('II*') - s.indexOf('Exif'), jxlc: s.indexOf('jxlc') > 0, tail: Array.from(out.slice(-5)), same, found, notJxl: PJ.Raw.jxlInDng(b) };
+  });
+  assert(r.head.join() === '0,0,0,12,74,88,76,32,13,10,135,10' && r.exifAt > 0 && r.tiffAfter === 8 && r.jxlc && r.tail.join() === '255,10,1,2,3' && r.same === 8, JSON.stringify(r));
+  assert(r.found && r.found.offset === 300 && r.found.length === 100 && r.found.width === 640 && r.notJxl === null, JSON.stringify(r.found));
+});
+
+test('fill takes each part of a hole from material of its own kind', async () => {
+  const r = await page(async () => {
+    // left half red noise, right half blue noise, a hole across the border; the map says which half is which
+    const w = 160, h = 120, rgb = new Uint8Array(w * h * 3), mask = new Uint8Array(w * h), label = new Uint8Array(w * h);
+    let s = 9; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x, L = x < 80, n = rnd() * 40; rgb.set(L ? [180 + n, 40, 40] : [40, 40, 180 + n], i * 3); label[i] = L ? 1 : 2; if (Math.abs(x - 80) < 22 && Math.abs(y - 60) < 22) { mask[i] = 1; rgb.set([0, 255, 0], i * 3); } }
+    const wk = new Worker(new URL('js/fillworker.js', location.href).href);
+    const out = await new Promise((res, rej) => { wk.onmessage = (e) => e.data.error ? rej(new Error(e.data.error)) : res(e.data.rgb); wk.postMessage({ id: 1, w, h, rgb, mask, label }); });
+    wk.terminate();
+    let wrong = 0, n = 0, green = 0;
+    for (let y = 40; y < 80; y++) for (let x = 60; x < 100; x++) { if (Math.abs(x - 80) < 3) continue; const i = (y * w + x) * 3, red = out[i] > out[i + 2]; n++; if (red !== (x < 80)) wrong++; if (out[i + 1] > 150) green++; }
+    return { wrong: wrong / n, green };
+  });
+  assert(r.green === 0 && r.wrong < 0.06, JSON.stringify(r));
+  return `${(r.wrong * 100).toFixed(1)}% of the filled area took material from the wrong side`;
 });
 
 test('stacks collapse and reopen', async () => {

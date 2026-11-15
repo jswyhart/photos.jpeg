@@ -134,7 +134,7 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 **Export (Ctrl+Shift+E)**
 - JPEG, PNG, WebP, TIFF or JPEG XL; quality; batch export of the selection
 - Exports run **in the background**: a small panel at the bottom right shows progress and has Cancel, further exports queue up behind the running one, and you can keep editing — each photo is exported with its settings as they were when you asked
-- **JPEG XL** (.jxl): noticeably smaller than JPEG at the same quality; quality 100 is lossless. Encoded by libjxl (WebAssembly, in `src/vendor/jxl`). No EXIF or colour profile is embedded in .jxl files yet (they are sRGB)
+- **JPEG XL** (.jxl): noticeably smaller than JPEG at the same quality; quality 100 is lossless. Encoded by libjxl (WebAssembly, in `src/vendor/jxl`). EXIF is written into the file (in the JPEG XL container); the file is always sRGB, which its own header says, so no colour profile is needed.
 - Destination folder or "same folder as original", optional subfolder
 - Naming templates: `{name} {seq} {date} {title} {rating} {custom}`; overwrite / unique name / skip
 - Resize by long edge, short edge, width × height, megapixels or percentage; don't enlarge
@@ -210,22 +210,42 @@ Develop → Color Grading → **Auto** (or Ctrl/⌘+Shift+G, or Library → Quic
 
 RAW files are developed into Display P3 primaries, which reach past sRGB in the reds and greens. A photo marked **Wide colour** (Develop → Calibration; on by default for RAW photos added from now on, see Preferences) is edited in that space from end to end: the viewer shows it on a P3 canvas, so a wide-gamut screen shows the extra colour, and an export as Display P3 or Adobe RGB carries it. An sRGB export, a thumbnail or an sRGB screen gets the picture narrowed to sRGB at the very end.
 
-Photos that are not marked — every RAW photo that was in a catalog before this existed — are brought to sRGB first and render as they always did. Turning the mark on or off is not an edit: presets, paste and reset leave it alone. Limits: the working space is P3, so an Adobe RGB export holds what P3 and Adobe RGB share; JPEG, PNG and other non-RAW sources are sRGB as before; `.cube` looks are applied in sRGB and brought back.
+Photos saved in Display P3 — JPEG and HEIC files from most phones — are read in P3 as well instead of being narrowed on the way in, and take the same mark.
+
+**Soft proof as sRGB** (below the mark) shows a wide-colour photo as an sRGB file or screen will, with the colours sRGB cannot hold in magenta. It changes only what you see.
+
+Photos that are not marked — every photo that was in a catalog before this existed — are brought to sRGB first and render as they always did. Turning the mark on or off is not an edit: presets, paste and reset leave it alone. Limits: the working space is P3, so an Adobe RGB export holds what P3 and Adobe RGB share; JPEG, PNG and other non-RAW sources are sRGB as before; `.cube` looks are applied in sRGB and brought back.
 
 ## Content-aware fill
 
-Spot Removal has a third mode, **Fill**: paint over what should go (a sign, a wire, a person in the background) and the area is rebuilt from what surrounds it, continuing textures and edges instead of copying one place. It is PatchMatch run from coarse to fine in its own thread (`js/fillworker.js`); a typical fill takes one to two seconds. The filled piece is made once at the photo's full resolution (up to 1024 pixels across the area) and kept beside the thumbnails; the photo's settings only name it, so undo, snapshots and virtual copies stay small. Pasting or syncing a fill onto another photo makes it again from that photo's own surroundings. A large area that spans several different materials can come out with the wrong material in its middle — fill such an area in smaller strokes.
+Spot Removal has a third mode, **Fill**: paint over what should go (a sign, a wire, a person in the background) and the area is rebuilt from what surrounds it, continuing textures and edges instead of copying one place. It is PatchMatch run from coarse to fine in its own thread (`js/fillworker.js`); a typical fill takes one to two seconds. The filled piece is made once at the photo's full resolution (up to 1024 pixels across the area) and kept beside the thumbnails; the photo's settings only name it, so undo, snapshots and virtual copies stay small. Pasting or syncing a fill onto another photo makes it again from that photo's own surroundings. When the scene model is there, the hole is divided among the kinds of thing around it (sky, trees, road, grass …) and each part is filled from material of its own kind. A large area that spans several materials can still come out with a patch of the wrong one — fill such an area in smaller strokes.
 
 ## People
 
 Library → **People** → the magnifier looks through the photos shown for faces (YuNet), describes each (SFace) and puts the faces that have no name into rows, one per person as far as it can tell. Type a name on a row to file all its faces under that person; click a face first to leave it out; **Ignore** drops faces you do not want to keep track of. People appear in the panel with their photo count, a click shows their photos, and their names are found by the search box and by smart collections. Right-click a person to rename, look through or remove them. Everything runs on this computer; the faces' descriptions are kept in the catalog and small face pictures beside the thumbnails. Faces seen at an odd angle usually end up in a row of their own.
 
+View → **Show Faces** draws the faces on the photo in Develop, with their names. Click one to name it, rename it or say it is not a face; Alt-drag a box around a face the detector missed. Once you have used Find faces, photos are looked through as they are imported (Preferences turns that off).
+
+Two more masks build on this (Develop → Masking): **Background** is everything but the subject, and **Person…** masks one person among several — choose whose face, by name when the face has one.
+
 ## Merge to HDR and to Panorama
 
 Select the photos, then Photo → **Merge to HDR…** or **Merge to Panorama…**. Each photo goes in as it is developed now; the result is written as a 16-bit TIFF next to the first photo (`name-HDR.tif`, `name-Pano.tif`) and added to the catalog, where it is edited like any other photo.
 
-- **HDR** takes two or more exposures of one scene, lines them up (shifts only — a tripod or a steady burst; it does not correct rotation or things that moved) and fuses them: every part of the picture comes mostly from the exposure that shows it best, blended across scales so no seams show. Bright areas stay brighter than dark ones, so the result looks like a photograph rather than a flattened one.
-- **Panorama** joins overlapping photos in the order they were taken. Corners are matched between neighbours, the photos are laid on a cylinder (using the focal length from the metadata, or a normal lens when there is none), evened out in brightness, feathered together and trimmed to a clean rectangle. It expects the camera to turn on the spot with a third or more overlap; fisheye photos (action cameras) and scenes with close foreground shot from different positions do not join well. Output is limited to 40 megapixels.
+- **HDR** takes two or more exposures of one scene, lines them up — hand-held frames are matched on their corners, so small turns are corrected as well as shifts — leaves out anything that moved between the frames (people, leaves, cars) so it does not show as a ghost, and fuses them: every part of the picture comes mostly from the exposure that shows it best, blended across scales so no seams show. Bright areas stay brighter than dark ones, so the result looks like a photograph rather than a flattened one.
+- **Panorama** joins overlapping photos in the order they were taken. Corners are matched between neighbours, the photos are laid on a cylinder (using the focal length from the metadata, or a normal lens when there is none), evened out in brightness, blended in two bands (broad light and colour over a wide stretch, fine detail from the strongest photo, so small misalignments show once and sharp rather than doubled) and trimmed to a clean rectangle. It expects the camera to turn on the spot with a third or more overlap; fisheye photos (action cameras) and scenes with close foreground shot from different positions do not join well. Output is limited to 40 megapixels.
+
+## Closing while exports run
+
+If the window is closed while the export queue is still working, the app asks first; **Close anyway** stops the queue (files already written stay), Cancel keeps the app open.
+
+## Models, the lite build and the Store package
+
+The neural-network models behind the masks and face grouping are part of the normal build (`src/vendor/ml`, about 63 MB). `windows\build.ps1 -Lite` leaves them out: the app then asks before downloading each one the first time a feature needs it, from this repository on GitHub, checks it against a size and SHA-256 built into the app (`windows/Models.cs`), and keeps it in the data folder. Nothing else is downloaded that way, and no photo leaves the computer.
+
+`windows\package-store.ps1` packs the app as an MSIX for the Microsoft Store with the identity reserved in Partner Center (`windows/store/AppxManifest.xml`). The package is left unsigned — the Store signs what is uploaded — so it cannot be installed by double-click; test with the ordinary build. A Store install keeps its own copy of the data folder once it writes to it (Windows redirects a packaged app's writes under AppData).
+
+DNG files whose picture is stored as JPEG XL (Galaxy S23 and later) can be developed from that data: Preferences → *Develop JPEG XL DNG files (experimental)*. It takes about half a minute per photo and does not yet match the camera's own rendering, so it is off unless you turn it on; otherwise such files open from their embedded preview.
 
 ## Catalog clean-up
 
