@@ -457,6 +457,11 @@
       let off = 0;
       for (const p of parts) { const a = new Uint8ClampedArray(p.buffer); data.set(a, off); off += a.length; }
     }
+    let data16 = null;
+    if (parts[0].buffer16) {
+      if (parts.length === 1) data16 = new Uint16Array(parts[0].buffer16);
+      else { data16 = new Uint16Array(W * H * 3); let off = 0; for (const p of parts) { const a = new Uint16Array(p.buffer16); data16.set(a, off); off += a.length; } }
+    }
     const hist = { r: new Uint32Array(256), g: new Uint32Array(256), b: new Uint32Array(256), l: new Uint32Array(256) };
     const clip = { hi: 0, lo: 0 };
     for (const p of parts) {
@@ -464,7 +469,7 @@
       clip.hi += p.clip.hi; clip.lo += p.clip.lo;
     }
     return {
-      data, width: W, height: H, fullWidth: parts[0].fullWidth, fullHeight: parts[0].fullHeight,
+      data, data16, width: W, height: H, fullWidth: parts[0].fullWidth, fullHeight: parts[0].fullHeight,
       region: { x: parts[0].region.x, y: parts[0].region.y, w: W, h: H }, hist, clip,
       ms: performance.now() - t0, level, levelWidth: lv.width, levelHeight: lv.height,
       fullW: src.fullW, fullH: src.fullH
@@ -716,9 +721,9 @@
   }
 
   /** Full-resolution render for export (parallel bands). */
-  async function renderFull(photo, settings, onProgress) {
+  async function renderFull(photo, settings, onProgress, opts) {
     onProgress && onProgress(0.05);
-    const res = await render(photo, settings, 'full', {}, 1);
+    const res = await render(photo, settings, 'full', opts || {}, 1);
     onProgress && onProgress(0.9);
     return res;
   }

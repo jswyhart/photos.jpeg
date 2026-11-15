@@ -226,6 +226,7 @@
     const dup = supported.length - added.length;
     if (!added.length) { UI.toast(`All ${dup} photo(s) are already in the catalog`, 'circle-info'); return []; }
     if (Cat.pref('lens.autoProfile', false)) added.forEach(p => { if (p.kind !== 'video') p.autoLens = true; });
+    if (Cat.pref('nr.autoIso', false)) added.forEach(p => { if (p.kind !== 'video') p.autoNr = true; });
     library.setLastImport(added.map(p => p.id));
     library.setSource('recent');
     refresh();
@@ -761,6 +762,7 @@
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
         h('h4', null, 'Import'),
         row('Apply lens profiles on import', 'New photos get the distortion and vignetting correction for their lens from the lens database.', chk('lens.autoProfile', false)),
+        row('Apply noise reduction by ISO on import', 'New photos taken at ISO 400 and above start with luminance and colour noise reduction to match.', chk('nr.autoIso', false)),
         row('Offer to import camera cards', 'Asks when a card or camera with photos is connected (Windows app).', chk('import.detectCards', true)),
         h('h4', null, 'Lightroom compatibility'),
         row('Read .xmp sidecars on import', 'Picks up Lightroom / Camera Raw edits, ratings, labels and keywords.', chk('xmp.readOnImport', true)),
@@ -1002,12 +1004,19 @@
     // "Apply lens profiles on import": a new photo gets its profile as soon as its camera data has been read
     Cat.events.on('meta', async (list) => {
       for (const p of list || []) {
-        if (!p.autoLens || !p.exifLoaded) continue;
-        delete p.autoLens;
-        if (p.settings.lens.profile || p.history.length > 1) continue;      // already profiled, or already being edited
-        const before = P.clone(p.settings);
-        try { await PJ.Lens.applyDatabaseProfile(p); Cat.commit(p, 'Lens profile'); afterSettings(p); }
-        catch (_) { p.settings = before; }                                  // not in the database: leave the photo as it is
+        if (!p.exifLoaded || !(p.autoLens || p.autoNr)) continue;
+        const lens = p.autoLens, nr = p.autoNr;
+        delete p.autoLens; delete p.autoNr;
+        if (p.history.length > 1) continue;                                 // already being edited: leave it alone
+        if (nr) {
+          const v = P.noiseReductionForIso(p.exif && +p.exif.iso);
+          if (v && !p.settings.detail.nrLuma && !p.settings.detail.nrColor) { Object.assign(p.settings.detail, v); Cat.commit(p, `Noise reduction for ISO ${p.exif.iso}`); afterSettings(p); }
+        }
+        if (lens && !p.settings.lens.profile) {
+          const before = P.clone(p.settings);
+          try { await PJ.Lens.applyDatabaseProfile(p); Cat.commit(p, 'Lens profile'); afterSettings(p); }
+          catch (_) { p.settings = before; }                                // not in the database: leave the photo as it is
+        }
       }
     });
     // a camera card was put in (or was in at start-up)

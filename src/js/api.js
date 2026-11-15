@@ -135,6 +135,12 @@
       writeAt: (h, offset, bytes) => call('writeAt', { handle: h, offset, data: b64(bytes) }),
       closeWrite: (h) => call('closeWrite', { handle: h }),
       abortWrite: WIN ? (h) => call('abortWrite', { handle: h }) : null,   // close and delete a failed export
+      // re-encode a PNG into a format the web view can't write itself (AVIF, through the bundled ffmpeg)
+      encodeImage: WIN ? async (png, format, quality) => {
+        const r = await fetch(`/__pj/encode?format=${q(format)}&quality=${Math.round(quality || 80)}`, { method: 'POST', body: png });
+        if (!r.ok) throw new Error((await r.text()) || `${format.toUpperCase()} encoding failed`);
+        return new Uint8Array(await r.arrayBuffer());
+      } : null,
       // developed RAW files at working size, kept on disk by the app shell (binary GET / POST, no base64)
       rawCache: WIN ? {
         get: async (key) => { const r = await fetch('/__pj/rawcache?key=' + q(key)); return r.status === 200 ? new Uint8Array(await r.arrayBuffer()) : null; },

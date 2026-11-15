@@ -10,7 +10,7 @@
   const DEFAULTS = {
     dest: 'choose', folder: '', subfolder: '', useSub: false,
     template: '{name}', custom: '', seqStart: 1,
-    format: 'jpeg', quality: 90,
+    format: 'jpeg', quality: 90, tiffBits: 8, colorSpace: 'srgb',
     resize: 'none', long: 2048, short: 1080, width: 1920, height: 1080, mp: 12, percent: 50, dontEnlarge: true,
     sharpen: 'none',
     metadata: 'all',
@@ -22,6 +22,39 @@
   };
 
   /* ---------------- encoders ---------------- */
+  /**
+   * Uncompressed RGB TIFF. img: { width, height, data (RGBA 8-bit) } or { width, height, data16 (RGB 16-bit) };
+   * icc: profile bytes to embed (optional).
+   */
+  function encodeTiffRich(img, icc) {
+    const w = img.width, hgt = img.height, deep = !!img.data16, bps = deep ? 16 : 8;
+    const soft = 'photos.jpeg\0';
+    const tags = [];   // [tag, type, count, value | bytes]
+    const pix = w * hgt * 3 * (deep ? 2 : 1);
+    tags.push([256, 4, 1, w], [257, 4, 1, hgt], [258, 3, 3, Uint8Array.from([bps, 0, bps, 0, bps, 0])], [259, 3, 1, 1], [262, 3, 1, 2],
+      [273, 4, 1, 0], [277, 3, 1, 3], [278, 4, 1, hgt], [279, 4, 1, pix],
+      [282, 5, 1, Uint8Array.from([44, 1, 0, 0, 1, 0, 0, 0])], [283, 5, 1, Uint8Array.from([44, 1, 0, 0, 1, 0, 0, 0])], [284, 3, 1, 1], [296, 3, 1, 2],
+      [305, 2, soft.length, Uint8Array.from(soft, ch => ch.charCodeAt(0))]);
+    if (icc) tags.push([34675, 7, icc.length, icc]);
+    tags.sort((a, b) => a[0] - b[0]);
+    let extra = 8 + 2 + tags.length * 12 + 4;
+    for (const t of tags) if (t[3] instanceof Uint8Array) { t.push(extra); extra += t[3].length + (t[3].length & 1); }
+    const dataOff = extra;
+    const buf = new ArrayBuffer(dataOff + pix), v = new DataView(buf), u8 = new Uint8Array(buf);
+    v.setUint16(0, 0x4949); v.setUint16(2, 42, true); v.setUint32(4, 8, true);
+    v.setUint16(8, tags.length, true);
+    tags.forEach((t, i) => {
+      const p = 10 + i * 12;
+      v.setUint16(p, t[0], true); v.setUint16(p + 2, t[1], true); v.setUint32(p + 4, t[2], true);
+      if (t[3] instanceof Uint8Array) { v.setUint32(p + 8, t[4], true); u8.set(t[3], t[4]); }
+      else if (t[0] === 273) v.setUint32(p + 8, dataOff, true);
+      else if (t[1] === 3) v.setUint16(p + 8, t[3], true); else v.setUint32(p + 8, t[3], true);
+    });
+    if (deep) new Uint8Array(buf, dataOff, pix).set(new Uint8Array(img.data16.buffer, img.data16.byteOffset, pix));   // little-endian, like the header
+    else { const d = img.data; let o = dataOff; for (let i = 0; i < d.length; i += 4) { u8[o++] = d[i]; u8[o++] = d[i + 1]; u8[o++] = d[i + 2]; } }
+    return u8;
+  }
+
   function encodeTiff(img) {
     const { width: w, height: hgt, data } = img;
     const nTags = 13;
@@ -239,14 +272,34 @@
       .replace(/\{name\}/g, base).replace(/\{seq\}/g, seqStr).replace(/\{date\}/g, date)
       .replace(/\{title\}/g, p.title || base).replace(/\{rating\}/g, String(p.rating || 0)).replace(/\{custom\}/g, o.custom || '');
     n = n.replace(/[\\/:*?"<>|]+/g, '_').trim() || base;
-    const ext = p.kind === 'video' && o.videoMode === 'video' ? 'mp4' : { jpeg: 'jpg', png: 'png', webp: 'webp', tiff: 'tif' }[o.format];
+    const ext = p.kind === 'video' && o.videoMode === 'video' ? 'mp4' : { jpeg: 'jpg', png: 'png', webp: 'webp', tiff: 'tif', avif: 'avif' }[o.format];
     return `${n}.${ext}`;
   }
 
+  /** The colour profile an export carries: the chosen space's, or none for formats / choices that don't embed one. */
+  function exportProfile(o) {
+    const space = PJ.ICC && o.colorSpace && o.colorSpace !== 'srgb' ? o.colorSpace : 'srgb';
+    if (!PJ.ICC || !['jpeg', 'png', 'tiff'].includes(o.format)) return { space: 'srgb', icc: null };
+    // a converted file is wrong without its profile; an sRGB file is tagged unless all metadata is stripped
+    return { space, icc: space !== 'srgb' || o.metadata !== 'none' ? PJ.ICC.profile(space) : null };
+  }
+
   async function encode(canvas, o, photo) {
+    const prof = exportProfile(o);
+    if (prof.space !== 'srgb') {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      PJ.ICC.convert(img.data, prof.space, 4, 255);
+      ctx.putImageData(img, 0, 0);
+    }
     if (o.format === 'tiff') {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      return encodeTiff(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      return encodeTiffRich(ctx.getImageData(0, 0, canvas.width, canvas.height), prof.icc);
+    }
+    if (o.format === 'avif') {
+      if (!API.encodeImage) throw new Error('AVIF export needs the Windows app with ffmpeg');
+      const pngBlob = canvas.convertToBlob ? await canvas.convertToBlob({ type: 'image/png' }) : await new Promise(r => canvas.toBlob(r, 'image/png'));
+      return API.encodeImage(new Uint8Array(await pngBlob.arrayBuffer()), 'avif', o.quality);
     }
     const type = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[o.format];
     const blob = canvas.convertToBlob ? await canvas.convertToBlob({ type, quality: o.quality / 100 }) : await new Promise(r => canvas.toBlob(r, type, o.quality / 100));
@@ -257,6 +310,8 @@
       if (src && src.jpegHeader) bytes = insertApp1(bytes, patchOrientation(src.jpegHeader));
       else { const app1 = buildExifApp1(photo); if (app1) bytes = insertApp1(bytes, app1); }
     }
+    if (prof.icc && o.format === 'jpeg') bytes = PJ.ICC.jpeg(bytes, prof.icc);          // sits between the JFIF header and the EXIF block
+    if (prof.icc && o.format === 'png') bytes = await PJ.ICC.png(bytes, prof.icc, PJ.ICC.names[prof.space]);
     return bytes;
   }
 
@@ -277,19 +332,32 @@
           step(1);
           continue;
         }
-        const res = await E.renderFull(p, p.settings, (f) => step(f * 0.7));
-        let canvas = E.toCanvas(res);
-        const [tw, th] = targetSize(canvas.width, canvas.height, o);
-        canvas = resizeCanvas(canvas, tw, th);
-        if (o.sharpen !== 'none') outputSharpen(canvas, o.sharpen);
-        watermark(canvas, o);
-        step(0.85);
-        const bytes = await encode(canvas, o, p);
+        // 16-bit TIFF comes straight from the render's own precision; resizing, output sharpening and
+        // watermarks are done on an 8-bit canvas, so with any of those the file is 8-bit
+        const want16 = o.format === 'tiff' && +o.tiffBits === 16;
+        const plain = o.resize === 'none' && o.sharpen === 'none' && !(o.wm && o.wmText);
+        const warnings = want16 && !plain ? ['16-bit TIFF applies to full-size exports without output sharpening or a watermark — these were written as 8-bit'] : [];
+        const res = await E.renderFull(p, p.settings, (f) => step(f * 0.7), want16 && plain ? { out16: true } : undefined);
+        let bytes;
+        if (want16 && plain && res.data16) {
+          const prof = exportProfile(o);
+          if (prof.space !== 'srgb') PJ.ICC.convert(res.data16, prof.space, 3, 65535);
+          step(0.85);
+          bytes = encodeTiffRich({ width: res.width, height: res.height, data16: res.data16 }, prof.icc);
+        } else {
+          let canvas = E.toCanvas(res);
+          const [tw, th] = targetSize(canvas.width, canvas.height, o);
+          canvas = resizeCanvas(canvas, tw, th);
+          if (o.sharpen !== 'none') outputSharpen(canvas, o.sharpen);
+          watermark(canvas, o);
+          step(0.85);
+          bytes = await encode(canvas, o, p);
+        }
         let dir = o.dest === 'same' && API.supportsSameFolder ? API.dirname(p.path) : folder;
         if (o.useSub && o.subfolder) dir = API.joinPath(dir, o.subfolder.replace(/[\\/:*?"<>|]+/g, '_'));
         const path = API.joinPath(dir, fileName(p, o, (o.seqStart || 1) + i));
         const written = await API.writeFile(path, bytes, o.conflict);
-        results.push({ photo: p, path: written, ok: !!written, skipped: written === null });
+        results.push({ photo: p, path: written, ok: !!written, skipped: written === null, warnings });
         E.dropFull();
       } catch (e) {
         console.error('export failed', p.name, e);
@@ -401,7 +469,9 @@
         field('Existing files', sel('conflict', [['unique', 'Choose a new name'], ['overwrite', 'Overwrite'], ['skip', 'Skip']]))),
       h('div', { class: 'section-title' }, 'File settings'),
       h('div', { class: 'form-grid' },
-        field('Format', sel('format', [['jpeg', 'JPEG'], ['png', 'PNG (lossless)'], ['webp', 'WebP'], ['tiff', 'TIFF (8-bit, uncompressed)']])),
+        field('Format', sel('format', [['jpeg', 'JPEG'], ['png', 'PNG (lossless)'], ['webp', 'WebP'], ['tiff', 'TIFF (uncompressed)'], ...(API.encodeImage ? [['avif', 'AVIF (small files; slow to write)']] : [])])),
+        field('TIFF bit depth', sel('tiffBits', [['8', '8 bits per channel'], ['16', '16 bits per channel (full size only)']])),
+        field('Colour space', sel('colorSpace', [['srgb', 'sRGB'], ['p3', 'Display P3'], ['adobe', 'Adobe RGB (1998)']])),
         h('div', { class: 'field' }, h('span', null, 'Quality'), qualityRow),
         field('Metadata', sel('metadata', [['all', 'Include camera metadata (EXIF) in JPEG'], ['none', 'Strip all metadata']]))),
       hasVideo ? h('div', { class: 'section-title' }, 'Video') : null,
@@ -534,5 +604,5 @@
     }
   }
 
-  global.PJ.Exporter = { openDialog, exportPhotos, encodeTiff, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
+  global.PJ.Exporter = { openDialog, exportPhotos, encodeTiff, encodeTiffRich, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
 })(window);

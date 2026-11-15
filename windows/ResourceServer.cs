@@ -82,7 +82,7 @@ public sealed class ResourceServer(CoreWebView2 web, string version)
 
     static string Reason(int status) => status switch
     {
-        200 => "OK", 204 => "No Content", 206 => "Partial Content", 403 => "Forbidden", 404 => "Not Found",
+        200 => "OK", 204 => "No Content", 206 => "Partial Content", 500 => "Server Error", 403 => "Forbidden", 404 => "Not Found",
         415 => "Unsupported Media Type", 416 => "Range Not Satisfiable", _ => "Error"
     };
 
@@ -111,6 +111,13 @@ public sealed class ResourceServer(CoreWebView2 web, string version)
         var path = uri.AbsolutePath;
         try
         {
+            if (path == "/__pj/encode")
+            {
+                if (body == null || body.Length == 0) return Fail(404);
+                int.TryParse(Query(uri, "quality"), out var quality);
+                try { return new Reply(200, VideoTool.EncodeStill(body, Query(uri, "format") ?? "", quality == 0 ? 80 : quality), "application/octet-stream"); }
+                catch (IOException ex) { Log.Warn(ex.Message); return new Reply(500, System.Text.Encoding.UTF8.GetBytes(ex.Message), "text/plain; charset=utf-8"); }
+            }
             if (path == "/__pj/rawcache")
             {
                 if (Query(uri, "key") is not { Length: > 0 } key) return Fail(404);

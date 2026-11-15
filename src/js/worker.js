@@ -82,8 +82,8 @@ self.onmessage = (e) => {
       self.postMessage({
         type: 'result', id: msg.id, ms,
         width: res.width, height: res.height, fullWidth: res.fullWidth, fullHeight: res.fullHeight,
-        region: res.region, hist: res.hist, clip: res.clip, buffer: res.data.buffer
-      }, [res.data.buffer]);
+        region: res.region, hist: res.hist, clip: res.clip, buffer: res.data.buffer, buffer16: res.data16 ? res.data16.buffer : null
+      }, res.data16 ? [res.data.buffer, res.data16.buffer] : [res.data.buffer]);
     }
   } catch (err) {
     self.postMessage({ type: 'error', id: msg.id, error: String(err && err.stack || err) });

@@ -606,6 +606,17 @@
       bslider('detail.detail', 'Detail', 0, 100, { def: 25 }),
       bslider('detail.masking', 'Masking', 0, 100),
       h('div', { class: 'sub' }, 'Noise Reduction'),
+      h('div', { class: 'btnrow', style: { marginTop: 0, marginBottom: '6px' } },
+        h('button', {
+          class: 'btn sm', title: 'Set luminance and colour noise reduction for the ISO this photo was taken at',
+          onclick: () => {
+            if (!photo) return;
+            const iso = photo.exif && +photo.exif.iso, nr = P.noiseReductionForIso(iso);
+            if (!nr) return UI.toast(iso ? `ISO ${iso} needs no noise reduction` : 'This photo does not record its ISO', 'circle-info');
+            Object.assign(photo.settings.detail, nr);
+            Cat.commit(photo, `Noise reduction for ISO ${iso}`); viewer.update('commit'); syncAll();
+          }
+        }, icon('wand-magic-sparkles'), 'Auto for ISO')),
       bslider('detail.nrLuma', 'Luminance', 0, 100),
       bslider('detail.nrDetail', 'Detail', 0, 100, { def: 50 }),
       bslider('detail.nrColor', 'Color', 0, 100),

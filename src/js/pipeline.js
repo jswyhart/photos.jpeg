@@ -788,6 +788,18 @@
   /* Main render (split into stage functions so V8 optimizes each loop)  */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Noise reduction suited to the ISO a photo was taken at: nothing at base ISO, rising by a
+   * fixed step per stop. { nrLuma, nrColor } for the Detail panel, or null when the ISO is
+   * unknown or low enough to need none.
+   */
+  function noiseReductionForIso(iso) {
+    if (!(iso >= 400)) return null;
+    const stops = Math.log2(iso / 200);
+    const nrLuma = Math.max(0, Math.min(60, Math.round(stops * 11)));
+    return { nrLuma, nrColor: Math.max(0, Math.min(70, Math.round(nrLuma * 0.8 + 8))) };
+  }
+
   /** One channel of an RGBA image at a fractional position (bilinear, edges repeated). */
   function sampleChannel(d, W, H, sx, sy, ch) {
     let fx = sx - 0.5, fy = sy - 0.5;
@@ -1201,16 +1213,22 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16) {
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
     const outw = Math.max(1, reg0.w), outh = Math.max(1, reg0.h);
     const out = new Uint8ClampedArray(outw * outh * 4);
+    // 16 bits per channel (RGB) for exports that ask for it: the edit's own precision, not rounded to 8 bits
+    const out16 = want16 ? new Uint16Array(outw * outh * 3) : null;
     const hr = new Uint32Array(256), hg = new Uint32Array(256), hb = new Uint32Array(256), hl = new Uint32Array(256);
     let nHi = 0, nLo = 0;
     for (let j = 0; j < outh; j++) {
       let si = (j + oy) * w + ox;
       let di = (j * outw) << 2;
       for (let k = 0; k < outw; k++, si++, di += 4) {
+        if (out16 !== null) {
+          const q = (j * outw + k) * 3, x = R[si], y = G[si], z = B[si];
+          out16[q] = x <= 0 ? 0 : x >= 1 ? 65535 : x * 65535 + 0.5; out16[q + 1] = y <= 0 ? 0 : y >= 1 ? 65535 : y * 65535 + 0.5; out16[q + 2] = z <= 0 ? 0 : z >= 1 ? 65535 : z * 65535 + 0.5;
+        }
         let r = R[si] * 255 + 0.5, g = G[si] * 255 + 0.5, b = B[si] * 255 + 0.5;
         r = r < 0 ? 0 : r > 255 ? 255 : r | 0; g = g < 0 ? 0 : g > 255 ? 255 : g | 0; b = b < 0 ? 0 : b > 255 ? 255 : b | 0;
         hr[r]++; hg[g]++; hb[b]++;
@@ -1224,7 +1242,7 @@
         out[di] = r; out[di + 1] = g; out[di + 2] = b; out[di + 3] = 255;
       }
     }
-    return { out, outw, outh, hist: { r: hr, g: hg, b: hb, l: hl }, clip: { hi: nHi, lo: nLo } };
+    return { out, out16, outw, outh, hist: { r: hr, g: hg, b: hb, l: hl }, clip: { hi: nHi, lo: nLo } };
   }
 
   /**
@@ -1334,9 +1352,9 @@
     // 8. Output
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H);
-    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW);
+    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16);
     return {
-      data: o.out, width: o.outw, height: o.outh,
+      data: o.out, data16: o.out16, width: o.outw, height: o.outh,
       fullWidth: geo.outW, fullHeight: geo.outH,
       region: { x: reg0.x, y: reg0.y, w: o.outw, h: o.outh },
       hist: o.hist, clip: o.clip
@@ -1771,7 +1789,7 @@
   }
 
   const api = {
-    neighborhoodPad, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
+    neighborhoodPad, noiseReductionForIso, resizePixels, orientPixels, stageSourceInput, allocPixels, copyPixels, isShared, SHARED,
     colorLUT, parseCube, applyCube, lookLUT, brushRaster, calibMatrix, autoGrade, analyzeForGrade, GRADE_STYLES, GRADE_STRENGTH, INPUT_PROFILES, inputLUT, inputKnee, rawLogEncode,
     HUE_BANDS, HUE_CENTERS, LOCAL_KEYS,
     defaultSettings, defaultLocalAdj, normalizeSettings, beforeSettings, clone,

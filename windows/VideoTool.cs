@@ -152,6 +152,32 @@ public sealed partial class VideoTool(Action<string, double, string> progress)
 
     static string BrawHelper() => Which(["pj-braw"]);
 
+    /// <summary>
+    /// Still-image encoding the web view can't do itself: a PNG in, AVIF out (libaom through ffmpeg).
+    /// quality 1…100 as in the Export dialog.
+    /// </summary>
+    public static byte[] EncodeStill(byte[] png, string format, int quality)
+    {
+        if (format != "avif") throw new IOException("Unsupported image format " + format);
+        var ff = Ffmpeg();
+        if (ff == "") throw new IOException("AVIF export needs ffmpeg, which this build doesn't include.");
+        var work = Directory.CreateTempSubdirectory("pj-still-").FullName;
+        try
+        {
+            string input = Path.Combine(work, "in.png"), output = Path.Combine(work, "out.avif");
+            File.WriteAllBytes(input, png);
+            var crf = Math.Clamp((int)Math.Round(63 - Math.Clamp(quality, 1, 100) * 0.55), 4, 60);
+            using var p = Start(ff, ["-hide_banner", "-loglevel", "error", "-y", "-i", input, "-frames:v", "1", "-c:v", "libaom-av1", "-still-picture", "1",
+                "-crf", crf.ToString(), "-b:v", "0", "-cpu-used", "6", "-row-mt", "1", "-pix_fmt", "yuv420p",
+                "-color_primaries", "bt709", "-color_trc", "iec61966-2-1", "-colorspace", "bt709", "-color_range", "pc", output], false, false);
+            var err = p.StandardError.ReadToEnd();
+            if (!p.WaitForExit(10 * 60 * 1000)) { try { p.Kill(true); } catch { } throw new IOException("AVIF encoding took too long and was stopped."); }
+            if (p.ExitCode != 0 || !File.Exists(output)) throw new IOException("AVIF encoding failed: " + LastLines(err));
+            return File.ReadAllBytes(output);
+        }
+        finally { try { Directory.Delete(work, true); } catch { /* temp files */ } }
+    }
+
     static (string Label, string Tool, string Args, string Output) ConverterFor(string ext)
     {
         var settings = ReadSettings();
