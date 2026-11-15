@@ -127,6 +127,13 @@ public sealed class Bridge
                 await Task.Run(() => Storage.WriteAtomic(Storage.ThumbPath(id), data));
                 return true;
             }
+            case "cleanStore":
+            {
+                var keep = Strings(a, "keep");
+                bool remove = a.TryGetProperty("remove", out var r) && r.ValueKind == JsonValueKind.True;
+                bool raw = a.TryGetProperty("raw", out var w) && w.ValueKind == JsonValueKind.True;
+                return await Task.Run(() => Storage.CleanStore(keep, remove, raw));
+            }
             case "deleteThumb":
             {
                 var id = S(a, "id");

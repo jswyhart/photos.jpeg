@@ -272,7 +272,7 @@
       .replace(/\{name\}/g, base).replace(/\{seq\}/g, seqStr).replace(/\{date\}/g, date)
       .replace(/\{title\}/g, p.title || base).replace(/\{rating\}/g, String(p.rating || 0)).replace(/\{custom\}/g, o.custom || '');
     n = n.replace(/[\\/:*?"<>|]+/g, '_').trim() || base;
-    const ext = p.kind === 'video' && o.videoMode === 'video' ? 'mp4' : { jpeg: 'jpg', png: 'png', webp: 'webp', tiff: 'tif', avif: 'avif' }[o.format];
+    const ext = p.kind === 'video' && o.videoMode === 'video' ? 'mp4' : { jpeg: 'jpg', png: 'png', webp: 'webp', tiff: 'tif', avif: 'avif', jxl: 'jxl' }[o.format];
     return `${n}.${ext}`;
   }
 
@@ -282,6 +282,22 @@
     if (!PJ.ICC || !['jpeg', 'png', 'tiff'].includes(o.format)) return { space: 'srgb', icc: null };
     // a converted file is wrong without its profile; an sRGB file is tagged unless all metadata is stripped
     return { space, icc: space !== 'srgb' || o.metadata !== 'none' ? PJ.ICC.profile(space) : null };
+  }
+
+  /* JPEG XL: libjxl as WebAssembly, in its own thread (vendor/jxl, js/jxlworker.js) */
+  let jxlWorker = null, jxlSeq = 0;
+  const jxlWaiting = new Map();
+  function encodeJxl(img, quality) {
+    if (!jxlWorker) {
+      jxlWorker = new Worker(new URL('js/jxlworker.js', location.href).href, { type: 'module' });
+      jxlWorker.onmessage = (ev) => { const w = jxlWaiting.get(ev.data.id); if (!w) return; jxlWaiting.delete(ev.data.id); if (ev.data.error) w.reject(new Error('JPEG XL encoding failed: ' + ev.data.error)); else w.resolve(ev.data.bytes); };
+      jxlWorker.onerror = (ev) => { for (const w of jxlWaiting.values()) w.reject(new Error('The JPEG XL encoder could not be started' + (ev && ev.message ? ': ' + ev.message : ''))); jxlWaiting.clear(); try { jxlWorker.terminate(); } catch (_) { } jxlWorker = null; };
+    }
+    return new Promise((resolve, reject) => {
+      const id = ++jxlSeq;
+      jxlWaiting.set(id, { resolve, reject });
+      jxlWorker.postMessage({ id, data: img.data, width: img.width, height: img.height, quality }, [img.data.buffer]);
+    });
   }
 
   async function encode(canvas, o, photo) {
@@ -295,6 +311,10 @@
     if (o.format === 'tiff') {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       return encodeTiffRich(ctx.getImageData(0, 0, canvas.width, canvas.height), prof.icc);
+    }
+    if (o.format === 'jxl') {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      return encodeJxl(ctx.getImageData(0, 0, canvas.width, canvas.height), Math.max(1, Math.min(100, Math.round(o.quality))));
     }
     if (o.format === 'avif') {
       if (!API.encodeImage) throw new Error('AVIF export needs the Windows app with ffmpeg');
@@ -337,7 +357,8 @@
         const want16 = o.format === 'tiff' && +o.tiffBits === 16;
         const plain = o.resize === 'none' && o.sharpen === 'none' && !(o.wm && o.wmText);
         const warnings = want16 && !plain ? ['16-bit TIFF applies to full-size exports without output sharpening or a watermark — these were written as 8-bit'] : [];
-        const res = await E.renderFull(p, p.settings, (f) => step(f * 0.7), want16 && plain ? { out16: true } : undefined);
+        const settings = (o.settingsOf && o.settingsOf.get(p.id)) || p.settings;
+        const res = await E.renderFull(p, settings, (f) => step(f * 0.7), want16 && plain ? { out16: true } : undefined);
         let bytes;
         if (want16 && plain && res.data16) {
           const prof = exportProfile(o);
@@ -469,7 +490,7 @@
         field('Existing files', sel('conflict', [['unique', 'Choose a new name'], ['overwrite', 'Overwrite'], ['skip', 'Skip']]))),
       h('div', { class: 'section-title' }, 'File settings'),
       h('div', { class: 'form-grid' },
-        field('Format', sel('format', [['jpeg', 'JPEG'], ['png', 'PNG (lossless)'], ['webp', 'WebP'], ['tiff', 'TIFF (uncompressed)'], ...(API.encodeImage ? [['avif', 'AVIF (small files; slow to write)']] : [])])),
+        field('Format', sel('format', [['jpeg', 'JPEG'], ['png', 'PNG (lossless)'], ['webp', 'WebP'], ['tiff', 'TIFF (uncompressed)'], ['jxl', 'JPEG XL (smaller than JPEG; quality 100 is lossless)'], ...(API.encodeImage ? [['avif', 'AVIF (small files; slow to write)']] : [])])),
         field('TIFF bit depth', sel('tiffBits', [['8', '8 bits per channel'], ['16', '16 bits per channel (full size only)']])),
         field('Colour space', sel('colorSpace', [['srgb', 'sRGB'], ['p3', 'Display P3'], ['adobe', 'Adobe RGB (1998)']])),
         h('div', { class: 'field' }, h('span', null, 'Quality'), qualityRow),
@@ -499,7 +520,7 @@
       folderLabel.title = folderLabel.textContent;
       chooseBtn.disabled = o.dest === 'same';
       qVal.textContent = `${o.quality}`;
-      qualityRow.style.opacity = o.format === 'jpeg' || o.format === 'webp' ? 1 : 0.35;
+      qualityRow.style.opacity = ['jpeg', 'webp', 'jxl', 'avif'].includes(o.format) ? 1 : 0.35;
       rzBox.replaceChildren(rzInputs[o.resize] || h('span', { class: 'muted' }, 'Full resolution'));
       wmBox.style.display = o.wm ? '' : 'none';
       const p = photos[0];
@@ -560,29 +581,70 @@
       if (!d) return;
       o.folder = d;
     }
-    const bar = h('div', { class: 'progress' }, h('i'));
-    const label = h('div', { class: 'muted', style: { marginBottom: '8px' } }, 'Preparing…');
-    let cancelled = false;
-    const signal = { cancelled: false };
-    const detail = h('div', { class: 'muted', style: { marginTop: '6px', fontSize: '11px' } });
-    const m = UI.modal({
-      title: 'Exporting', icon: 'file-export', body: h('div', null, label, bar, detail), sticky: true,
-      buttons: [{ label: 'Cancel', onClick: () => { cancelled = true; signal.cancelled = true; } }]
-    });
-    const list = [];
-    for (const p of photos) { if (cancelled) break; list.push(p); }
+    // Exports run in the background, one job after another: the photos can be worked on meanwhile.
+    // Each photo is exported with its settings as they are now, whatever is changed while it waits.
+    const job = {
+      photos: photos.slice(), o, signal: { cancelled: false }, done: 0, label: '', detail: '', frac: 0,
+      settingsOf: new Map(photos.map(p => [p.id, P.clone(p.settings)]))
+    };
+    job.finished = new Promise((resolve) => { job.resolve = resolve; });
+    queue.push(job);
+    showQueue();
+    if (queue.length > 1) UI.toast(`Export queued behind ${queue.length - 1} other${queue.length > 2 ? 's' : ''}`, 'file-export');
+    pump();
+    return job.finished;
+  }
+
+  const queue = [];
+  let pumping = false, queueEl = null;
+  /** The small panel at the bottom right that shows what is exporting. */
+  function showQueue() {
+    if (!queue.length) { if (queueEl) { queueEl.remove(); queueEl = null; } UI.activity(''); return; }
+    const job = queue[0], total = queue.reduce((n, j) => n + j.photos.length, 0), doneAll = job.done;
+    if (!queueEl) {
+      queueEl = h('div', { class: 'export-queue' });
+      document.body.appendChild(queueEl);
+    }
+    const bar = h('div', { class: 'progress' }, h('i', { style: { width: Math.round(job.frac * 100) + '%' } }));
+    queueEl.replaceChildren(
+      h('div', { class: 'row' }, h('b', null, 'Exporting'), h('span', { class: 'spacer' }),
+        h('button', { class: 'btn sm', title: queue.length > 1 ? 'Stop this export and the ones waiting' : 'Stop this export', onclick: () => { for (const j of queue) j.signal.cancelled = true; showQueue(); } }, 'Cancel')),
+      h('div', { class: 'muted' }, job.signal.cancelled ? 'Stopping…' : job.label || 'Preparing…'), bar,
+      job.detail ? h('div', { class: 'muted small' }, job.detail) : null,
+      queue.length > 1 ? h('div', { class: 'muted small' }, `${queue.length - 1} more export${queue.length > 2 ? 's' : ''} waiting (${total - job.photos.length} items)`) : null);
+    UI.activity(`Exporting ${Math.min(job.photos.length, doneAll + 1)}/${job.photos.length}${queue.length > 1 ? ` (+${queue.length - 1} queued)` : ''}`, job.frac);
+  }
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      while (queue.length) {
+        const job = queue[0];
+        try { await runJob(job); }
+        catch (e) { console.error('export job failed', e); UI.toast('The export stopped: ' + (e && e.message || e), 'triangle-exclamation'); }
+        queue.shift();
+        showQueue();
+        job.resolve();
+      }
+    } finally { pumping = false; }
+  }
+  /** True while exports are running or waiting (the app asks before closing). */
+  const busy = () => queue.length > 0;
+
+  async function runJob(job) {
+    const o = job.o, list = job.photos, signal = job.signal;
     const all = [];
-    for (let i = 0; i < list.length && !cancelled; i++) {
-      const r = await exportPhotos([list[i]], { ...o, seqStart: (o.seqStart || 1) + i, signal, onDetail: (t) => { detail.textContent = t || ''; } }, (f, p) => {
-        const tot = (i + f) / list.length;
-        bar.firstChild.style.width = Math.round(tot * 100) + '%';
-        label.textContent = `${i + 1} / ${list.length} — ${Cat.displayName(p)}`;
-        UI.activity(`Exporting ${i + 1}/${list.length}`, tot);
+    let cancelled = false;
+    for (let i = 0; i < list.length; i++) {
+      if (signal.cancelled) { cancelled = true; break; }
+      const r = await exportPhotos([list[i]], { ...o, seqStart: (o.seqStart || 1) + i, signal, settingsOf: job.settingsOf, onDetail: (t) => { job.detail = t || ''; showQueue(); } }, (f, p) => {
+        job.frac = (i + f) / list.length; job.done = i;
+        job.label = `${i + 1} / ${list.length} — ${Cat.displayName(p)}`;
+        showQueue();
       });
       all.push(...r);
     }
-    UI.activity('');
-    m.close();
+    if (signal.cancelled) cancelled = true;
     const ok = all.filter(r => r.ok), failed = all.filter(r => !r.ok && !r.skipped), skipped = all.filter(r => r.skipped);
     if (failed.length) {
       UI.modal({
@@ -604,5 +666,5 @@
     }
   }
 
-  global.PJ.Exporter = { openDialog, exportPhotos, encodeTiff, encodeTiffRich, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
+  global.PJ.Exporter = { openDialog, exportPhotos, run, busy, queueLength: () => queue.length, encodeTiff, encodeTiffRich, DEFAULTS, presetList, publishPresets, runPreset, buildExifApp1 };
 })(window);

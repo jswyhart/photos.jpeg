@@ -705,6 +705,46 @@
     return { close, panes, zoom: zs, place };
   }
 
+  /* ---------------- catalog clean-up ---------------- */
+  /** Everything in the thumbnail store that the catalog still refers to: previews, LUTs, mask shapes (also those only an undo step or a snapshot names). */
+  function storeKeys() {
+    const keep = new Set();
+    const masksOf = (s) => { if (s && s.masks) for (const m of s.masks) if (m.map && m.map.id) keep.add('mm_' + m.map.id); };
+    for (const p of Cat.state.photos) {
+      keep.add(p.id);
+      masksOf(p.settings);
+      for (const e of p.history || []) masksOf(e.settings);
+      for (const e of p.snapshots || []) masksOf(e.settings);
+    }
+    for (const l of Cat.state.luts || []) keep.add(l.id);
+    for (const pr of Cat.state.presets || []) masksOf(pr.settings);
+    if (clipboard) masksOf(clipboard.partial);
+    return [...keep];
+  }
+  async function cleanCatalog() {
+    if (!API.cleanStore) return UI.toast('Catalog clean-up is part of the Windows app', 'circle-info');
+    const mb = (b) => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + ' GB' : (b / (1 << 20)).toFixed(1) + ' MB';
+    let u;
+    try { await Cat.save(); u = await API.cleanStore(storeKeys(), false, false); }
+    catch (e) { return UI.toast('The catalog folder could not be read: ' + (e.message || e), 'triangle-exclamation'); }
+    const go = async (raw) => {
+      try {
+        const r = await API.cleanStore(storeKeys(), true, raw);
+        UI.toast(`Removed ${r.removed} leftover file${r.removed === 1 ? '' : 's'}${raw ? ` and ${r.rawRemoved} cached RAW development${r.rawRemoved === 1 ? '' : 's'}` : ''}`, 'broom');
+      } catch (e) { UI.toast('Clean-up failed: ' + (e.message || e), 'triangle-exclamation'); }
+    };
+    UI.modal({
+      title: 'Clean Up Catalog', icon: 'broom',
+      body: h('div', { style: { width: '420px', lineHeight: 1.5 } },
+        h('p', null, h('b', null, `${u.orphans} leftover file${u.orphans === 1 ? '' : 's'} (${mb(u.orphanBytes)})`), ' — previews and mask shapes of photos that were removed from the catalog, or of masks that were deleted and can no longer be brought back by undo. Nothing in the catalog uses them.'),
+        h('p', null, h('b', null, `RAW cache: ${u.rawFiles} file${u.rawFiles === 1 ? '' : 's'} (${mb(u.rawBytes)})`), ' — developed RAW files kept so they open quickly. Safe to clear; each photo is developed again the next time it is opened.'),
+        h('p', { class: 'muted' }, `The store holds ${u.thumbs} files (${mb(u.thumbBytes)}) in all. Your photos, edits and the catalog itself are not touched.`)),
+      buttons: [{ label: 'Close' },
+        { label: 'Clear RAW cache too', onClick: () => go(true) },
+        { label: u.orphans ? 'Remove leftovers' : 'Nothing to remove', primary: true, onClick: () => { if (u.orphans) go(false); } }]
+    });
+  }
+
   /* ---------------- stacks ---------------- */
   function stackSelection() {
     const ts = selectedPhotos();
@@ -1161,7 +1201,7 @@
     rotateLeft: () => rotate(-90), rotateRight: () => rotate(90), flipH: () => flip('h'), flipV: () => flip('v'),
     autoTone: () => module === 'develop' ? develop.autoTone() : autoToneSelection(),
     lensProfile: lensProfileSelection,
-    compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack,
+    compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
     toggleStack: () => { const p = activePhoto(); if (p && p.stack) library.toggleStack(p.stack); else UI.toast('This photo isn\'t in a stack', 'circle-info'); },
     print: printDialog,
     reset: () => module === 'develop' ? develop.resetAll() : resetSelection(),
@@ -1201,7 +1241,7 @@
     openDevelop, photoMenu, selectIds, setRating, setFlag, setLabel, rotate, flip, removePhotos, copySettings, pasteSettings, syncSettings,
     refreshPhotos, refreshView, autoGradeSelection, gradeLookMenu, xmpRead, xmpWrite, preferences,
     applyPresetToSelection, autoToneSelection, resetSelection, slideshow, setModule, runCommand, back, toggleDrawer,
-    compareView, printSheet, exportSelected: () => PJ.Exporter.openDialog(targets())
+    compareView, printSheet, storeKeys, cleanCatalog, exportSelected: () => PJ.Exporter.openDialog(targets())
   });
 
   async function boot() {

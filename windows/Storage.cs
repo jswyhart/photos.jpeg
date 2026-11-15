@@ -18,7 +18,7 @@ public static class Storage
     public static readonly HashSet<string> ImageExt = [.. Raw, .. Std];
     /// <summary>Everything the catalog can hold (photos + video).</summary>
     public static readonly HashSet<string> MediaExt = [.. Raw, .. Std, .. Video];
-    public static readonly HashSet<string> WriteExt = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "avif", "json", "mp4", "mov"];
+    public static readonly HashSet<string> WriteExt = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "avif", "jxl", "json", "mp4", "mov"];
     public static readonly HashSet<string> TextExt = ["cube", "xmp", "json", "pjpreset", "txt"];
 
     /// <summary>The import dialog's file filter.</summary>
@@ -340,6 +340,31 @@ public static class Storage
             }
             WriteAtomic(CatalogPath, json);
         }
+    }
+
+    /// Catalog clean-up. Counts (and, when asked, removes) the files in the thumbnail store that no
+    /// photo, mask or LUT of the catalog refers to any more, and the RAW cache. Files written in the
+    /// last ten minutes are left alone: something may be about to refer to them.
+    public static object CleanStore(IEnumerable<string> keepIds, bool remove, bool clearRaw)
+    {
+        var keep = new HashSet<string>(keepIds.Select(id => Path.GetFileName(ThumbPath(id))), StringComparer.OrdinalIgnoreCase);
+        int orphans = 0, removed = 0, rawFiles = 0, rawRemoved = 0; long orphanBytes = 0, rawBytes = 0, thumbBytes = 0; int thumbs = 0;
+        var cutoff = DateTime.UtcNow - TimeSpan.FromMinutes(10);
+        if (Directory.Exists(ThumbsDir))
+            foreach (var f in new DirectoryInfo(ThumbsDir).GetFiles())
+            {
+                thumbs++; thumbBytes += f.Length;
+                if (keep.Contains(f.Name) || f.LastWriteTimeUtc > cutoff) continue;
+                orphans++; orphanBytes += f.Length;
+                if (remove) try { f.Delete(); removed++; } catch { /* in use: next time */ }
+            }
+        if (Directory.Exists(RawCacheDir))
+            foreach (var f in new DirectoryInfo(RawCacheDir).GetFiles())
+            {
+                rawFiles++; rawBytes += f.Length;
+                if (clearRaw) try { f.Delete(); rawRemoved++; } catch { /* in use */ }
+            }
+        return new { thumbs, thumbBytes, orphans, orphanBytes, removed, rawFiles, rawBytes, rawRemoved };
     }
 
     public static string ThumbPath(string id)

@@ -443,6 +443,7 @@ public sealed class MainForm : Form
                 Cmd("Keyboard Shortcuts", "shortcuts", "Ctrl+/"),
                 Cmd("About photos.jpeg", "about"),
                 updateItem,
+Cmd("Clean Up Catalog…", "cleanCatalog"),
                 Item("Show Log", () => { Log.Info("log opened from the Help menu"); try { Process.Start(new ProcessStartInfo(Log.File_) { UseShellExecute = true }); } catch (Exception ex) { Log.Error("opening the log", ex); } }),
                 Item("Open Catalog Folder", () => Process.Start(new ProcessStartInfo(Storage.Root) { UseShellExecute = true })))
         ]);

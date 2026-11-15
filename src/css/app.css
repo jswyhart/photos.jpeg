@@ -51,6 +51,11 @@ input[type="text"], input[type="number"], input[type="search"], textarea, select
 input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, textarea:focus, select:focus { border-color: var(--accent); }
 textarea { resize: vertical; min-height: 48px; width: 100%; }
 select { padding: 4px 6px; }
+.export-queue { position: fixed; right: 14px; bottom: 34px; z-index: 800; width: 290px; padding: 10px 12px; border-radius: 8px; background: #1d2026; border: 1px solid var(--border); box-shadow: 0 8px 28px #0009; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.export-queue .row { display: flex; align-items: center; }
+.export-queue .spacer { flex: 1; }
+.export-queue .small { font-size: 11px; }
+.export-queue .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hue-swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid #0008; margin-right: 6px; flex: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

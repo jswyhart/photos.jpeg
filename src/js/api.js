@@ -84,6 +84,7 @@
       saveCatalog: (obj) => call('saveCatalog', { json: JSON.stringify(obj) }),
       saveThumb: (id, bytes) => call('saveThumb', { id, data: b64(bytes) }),
       deleteThumb: (id) => call('deleteThumb', { id }),
+      cleanStore: (keep, remove, raw) => call('cleanStore', { keep, remove: !!remove, raw: !!raw }),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,
       chooseDirectory: (def) => call('chooseDirectory', { path: def || '' }),
