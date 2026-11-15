@@ -106,9 +106,10 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 **Library module (G)**
 - Catalog with import of files or whole folders (recursive), drag & drop of files/folders, duplicate detection
 - Grid with adjustable thumbnail size, filmstrip, multi-select (Ctrl/Shift-click)
-- Ratings (0–5), Pick/Reject flags, color labels, title, caption, keywords with suggestions
+- Ratings (0–5), Pick/Reject flags, color labels, title, caption, keywords with suggestions — both the keywords you have used before and, with *Suggest from the photo*, what a scene model sees in the picture (sky, tree, road, building, water, people, car …). Suggestions are only offered; nothing is added until you click it
 - Filter bar: text search (name, keyword, camera, lens, folder), flag, rating, label, RAW/non-RAW, edited, virtual copies; sort by capture time, added order, name, rating, edit time, pixel count
 - Sources: All Photographs, Previous Import, Edited, Picks, Rejected, Missing, Folders, Collections (drag photos onto a collection)
+- **Smart collections** (the wand button on the Collections panel): a saved search — text, keyword, camera or lens, rating, flag, label, kind, edited, captured in the last N days, ISO — that fills itself and stays up to date. A new one starts from what the filter bar shows; double-click one to change its rule
 - Quick Develop: relative exposure/tone/WB/presence nudges, presets and Auto Tone for many photos at once
 - Full EXIF panel (camera, lens, exposure, ISO, focal length, date, GPS, artist, copyright)
 - Virtual copies, remove from catalog, slideshow (Ctrl+Enter)
@@ -122,7 +123,7 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 - Lens corrections (distortion, vignetting), Transform (vertical/horizontal perspective, rotate, aspect, scale, offsets), Effects (post-crop vignette with midpoint/roundness/feather/highlights, film grain with size/roughness), Calibration (shadow tint, RGB primaries)
 - Crop & Straighten (R): aspect presets, lock, swap orientation, drag-outside-to-rotate with auto-shrinking crop, rule-of-thirds grid
 - Spot removal (Q): heal or clone with automatic source selection, size/feather/opacity
-- Masking (M): linear gradient, radial gradient, brush (size, feather, flow, erase); invert, amount, luminance-range refinement, red overlay (O); 12 local adjustments per mask
+- Masking (M): linear gradient, radial gradient, brush (size, feather, flow, erase); invert, amount, luminance-range refinement, **colour-range** refinement (limit a mask to one colour, picked from the photo with the eyedropper), **combine** (only inside, or not inside, another mask of the photo), red overlay (O); 12 local adjustments per mask
 - Before/after: hold `\`, side-by-side (Y), top/bottom (Alt+Y), split slider (Shift+Y)
 - Fit / Fill / 1:1 / 2:1 zoom with true full-resolution rendering of the visible area, Space-drag pan, navigator
 - Live RGB histogram with clipping warnings (J) and pixel readout
@@ -131,7 +132,9 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 - Copy / Paste / Sync settings with per-group checkboxes, "Previous" settings
 
 **Export (Ctrl+Shift+E)**
-- JPEG, PNG, WebP or 8-bit TIFF; quality; batch export of the selection
+- JPEG, PNG, WebP, TIFF or JPEG XL; quality; batch export of the selection
+- Exports run **in the background**: a small panel at the bottom right shows progress and has Cancel, further exports queue up behind the running one, and you can keep editing — each photo is exported with its settings as they were when you asked
+- **JPEG XL** (.jxl): noticeably smaller than JPEG at the same quality; quality 100 is lossless. Encoded by libjxl (WebAssembly, in `src/vendor/jxl`). No EXIF or colour profile is embedded in .jxl files yet (they are sRGB)
 - Destination folder or "same folder as original", optional subfolder
 - Naming templates: `{name} {seq} {date} {title} {rating} {custom}`; overwrite / unique name / skip
 - Resize by long edge, short edge, width × height, megapixels or percentage; don't enlarge
@@ -139,10 +142,12 @@ gradle assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
 - Output sharpening for screen, text watermark, camera metadata in JPEG exports: the original EXIF block for JPEG sources, and EXIF written from the catalog (camera, lens, exposure, ISO, focal length, capture time, author, GPS) for RAW, TIFF and PNG sources
 - **Lens profiles** (Develop → Lens Corrections → *Lens profile*, or Photo → Apply Lens Profile for a whole selection): the photo's camera and lens are looked up in the bundled [lensfun](https://lensfun.github.io) database (about 1,500 lenses) and the calibrated distortion, colour fringing (lateral chromatic aberration) and vignetting for the focal length and aperture used are corrected. The image is scaled just enough to leave no empty border. *Off* removes it. Preferences → *Apply lens profiles on import* does it for every new photo. Fisheye lenses are not handled; vignetting assumes a distant subject.
 - **Auto upright** (Develop → Transform): finds the vertical lines in the photo and sets Vertical, Rotate and Scale so buildings stand straight. It needs several long, straight vertical edges spread across the frame and says so when there aren't enough.
+- **Luminance noise reduction** works by wavelet shrinkage: the brightness is split into fine-to-coarse layers and, in each, differences smaller than the noise are reduced while edges and texture are kept. It removes the coarse blotches of high-ISO noise as well as the fine grain. Measured on photos with known added noise it is 0.03–1.9 dB closer to the clean picture than the blur-based method it replaced.
+- **Pasting or syncing Subject / Sky / People masks**: the mask is found again in each photo it is pasted to (the shape belongs to the photo it was made on); if a photo has no sky or people, that mask does nothing there and the message says so.
 - **Noise reduction for the ISO** (Develop → Detail → *Auto for ISO*, or Preferences → *Apply noise reduction by ISO on import*): sets luminance and colour noise reduction from the ISO the photo was taken at.
 - **Subject, Sky and People masks** (Develop → Masking): a small neural network finds the subject, the sky or the people in the photo and makes a mask of them — an ordinary mask from then on: adjust it, invert it, limit it by luminance, or touch it up with the brush (paint to add, Alt-paint to erase). It runs on your computer in a fraction of a second; nothing is uploaded. The models are bundled in `src/vendor/ml` (about 35 MB with the runtime) — see the README there for their licences: the Sky and People model (SegFormer) is licensed by NVIDIA for non-commercial use only.
 - **Healing strokes**: with the spot tool, drag instead of clicking to heal or clone along a line (wires, scratches); the stroke moves and deletes as one piece.
-- **Compare** (View → Compare Selected Photos): two to six photos side by side; rate, pick and reject from the keyboard.
+- **Compare** (View → Compare Selected Photos): two to six photos side by side; rate, pick and reject from the keyboard. The mouse wheel zooms and dragging pans **all panes together**, so the same spot is compared (double-click: 1:1 at that point, or back to fit; zoomed in, the panes switch to full-size renders). Each pane shows a **sharpness** score relative to the sharpest of the photos compared — it measures the crispest tenth of the picture, so a soft background does not count against a sharp subject.
 - **Stacks** (Photo → Stacking): group photos under one thumbnail, or let *Auto-Stack* group bursts (shots within two seconds) and RAW + JPEG pairs. The badge on the thumbnail opens and closes a stack.
 - **Print** (File → Print, Ctrl+P): a contact sheet of the selection (2–8 across, with names and dates) or one photo per page, through the system print dialog — which also saves PDFs.
 - **Match camera** (same panel), for lenses the database doesn't have: measures the distortion by comparing the developed RAW with the camera's own corrected preview inside the file, and remembers it for that lens and focal length. It can only learn what the camera itself corrects.
@@ -200,6 +205,10 @@ Formats the editor can't open itself fall back to the operating system's decoder
 ## Auto color grade
 
 Develop → Color Grading → **Auto** (or Ctrl/⌘+Shift+G, or Library → Quick Develop → Auto Grade for a whole selection). It analyses the photo or video frame as currently toned — color casts in the shadows, midtones and highlights (measured on near-neutral areas), colorfulness, skin tones, warm/cool balance and dominant hue — and sets the grading wheels, blending/balance, vibrance and saturation. Pick a look (Auto, Balanced, Cinematic, Warm, Cool, Moody, Film, Soft pastel) and a strength (Subtle/Normal/Strong). Everything it sets stays editable and lands in History as one step.
+
+## Catalog clean-up
+
+Help → **Clean Up Catalog…** (Windows app) shows how much space is held by leftovers — previews and mask shapes that no photo, undo step, snapshot or preset refers to any more — and by the RAW cache, and removes them when you say so. Photos, edits and the catalog are not touched.
 
 ## Collections & refresh
 

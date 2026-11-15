@@ -17,3 +17,6 @@ segformer-b0-ade.onnx
     (https://github.com/NVlabs/SegFormer/blob/master/LICENSE). Used for the Sky and People masks.
     If this app is ever distributed commercially, leave this file out (the Sky and People masks then
     report that their model is missing) or replace it with a model under a licence that allows it.
+
+The models run in their own thread (js/aiworker.js). The scene model also
+provides keyword suggestions in the Library (PJ.AIMask.describe).

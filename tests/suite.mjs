@@ -237,6 +237,111 @@ test('Sky mask: found, stored outside the settings, same on both renderers', asy
   return `sky covers ${(r.cover * 100).toFixed(0)}%`;
 });
 
+test('noise reduction removes noise and keeps edges', async () => {
+  const r = await page(() => {
+    // a flat grey field with a hard edge down the middle, plus noise of a known strength
+    const P = PJ.Pipeline, w = 256, h = 256, clean = new Float32Array(w * h), noisy = new Float32Array(w * h);
+    let seed = 7; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    for (let i = 0; i < w * h; i++) { clean[i] = (i % w) < w / 2 ? 0.3 : 0.6; noisy[i] = clean[i] + (rnd() + rnd() + rnd() - 1.5) * 0.06; }
+    const out = P.waveletDenoise(noisy, w, h, 0.5, 0.5, 1);
+    const err = (a) => { let s = 0; for (let i = 0; i < a.length; i++) s += (a[i] - clean[i]) ** 2; return Math.sqrt(s / a.length); };
+    // the edge: the step between the two columns either side of the middle
+    let step = 0; for (let y = 0; y < h; y++) step += out[y * w + w / 2 + 1] - out[y * w + w / 2 - 2]; step /= h;
+    return { before: err(noisy), after: err(out), step };
+  });
+  assert(r.after < r.before * 0.5, `noise went from ${r.before.toFixed(4)} to only ${r.after.toFixed(4)}`);
+  // at this strength a hard edge keeps at least five sixths of its contrast one pixel either side (a blur of the same strength keeps about half)
+  assert(r.step > 0.25, `the edge was softened: a step of 0.30 became ${r.step.toFixed(3)}`);
+  return `noise ${r.before.toFixed(3)} → ${r.after.toFixed(3)}, edge step ${r.step.toFixed(2)} of 0.30`;
+});
+
+test('masks: colour range and intersect / subtract, same on both renderers', async () => {
+  const r = await page(async () => {
+    const E = PJ.Engine, P = PJ.Pipeline, Cat = PJ.Catalog, p = Cat.state.photos.find(x => x.name === 'gradient.jpg');
+    await E.ensureSource(p);
+    const px = (cv) => { const t = document.createElement('canvas'); t.width = cv.width; t.height = cv.height; const x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(cv, 0, 0); return x.getImageData(0, 0, cv.width, cv.height).data; };
+    const mk = (o) => Object.assign({ id: Cat.uid('mk_'), type: 'radial', name: 'm', visible: true, invert: false, amount: 100, lumMin: 0, lumMax: 100, lumSmooth: 20, cx: 0.5, cy: 0.33, rx: 0.9, ry: 0.9, feather: 10, adj: Object.assign(P.defaultLocalAdj(), { exposure: 1.2 }) }, o);
+    const base = P.defaultSettings(), plain = (await E.render(p, base, 'proxy', {}, 0)).data;
+    const run = async (masks) => {
+      const s = P.normalizeSettings(Object.assign(P.clone(base), { masks })), c = (await E.render(p, s, 'proxy', {}, 0)).data, g = E.renderGPU(p, s, {});
+      const gp = g ? px(g.canvas) : null; let changed = 0, n = 0, diff = 0;
+      for (let i = 0; i < c.length; i += 4) { n++; if (Math.abs(c[i] - plain[i]) + Math.abs(c[i + 1] - plain[i + 1]) + Math.abs(c[i + 2] - plain[i + 2]) > 9) changed++; if (gp) diff += (Math.abs(c[i] - gp[i]) + Math.abs(c[i + 1] - gp[i + 1]) + Math.abs(c[i + 2] - gp[i + 2])) / 3; }
+      return { share: changed / n, gpu: gp ? diff / n : null };
+    };
+    const small = mk({ rx: 0.2, ry: 0.2, adj: P.defaultLocalAdj() });
+    return {
+      all: await run([mk({})]), orange: await run([mk({ colOn: true, colHue: 30, colRange: 30 })]),
+      inside: await run([mk({ limit: { id: small.id, mode: 'intersect' } }), small]), outside: await run([mk({ limit: { id: small.id, mode: 'subtract' } }), small])
+    };
+  });
+  assert(r.all.share > 0.95, 'the plain mask should cover the photo');
+  assert(r.orange.share > 0.03 && r.orange.share < 0.9, `a colour-limited mask changed ${(r.orange.share * 100).toFixed(0)}% of the photo`);
+  assert(r.inside.share < 0.35 && r.outside.share > 0.6 && Math.abs(r.inside.share + r.outside.share - r.all.share) < 0.12, `intersect ${r.inside.share.toFixed(2)} + subtract ${r.outside.share.toFixed(2)} should make up the whole ${r.all.share.toFixed(2)}`);
+  for (const k of ['all', 'orange', 'inside', 'outside']) if (r[k].gpu !== null) assert(r[k].gpu < 1.5, `${k}: renderers differ by ${r[k].gpu.toFixed(2)}`);
+  return `colour range keeps ${(r.orange.share * 100).toFixed(0)}%, intersect ${(r.inside.share * 100).toFixed(0)}%, subtract ${(r.outside.share * 100).toFixed(0)}%`;
+});
+
+test('a pasted Sky mask is found again in the other photo', async () => {
+  const r = await page(async () => {
+    const Cat = PJ.Catalog, M = PJ.AIMask, P = PJ.Pipeline, E = PJ.Engine;
+    const a = Cat.state.photos.find(x => x.name === 'building.jpg'), b = Cat.state.photos.find(x => x.name === 'gradient.jpg');
+    await E.ensureSource(a); await E.ensureSource(b);
+    const f = await M.create(a, 'sky');
+    const mask = Object.assign({ id: Cat.uid('mk_'), type: 'brush', dabs: [], visible: true, amount: 100, adj: P.defaultLocalAdj() }, f);
+    const keep = P.clone(b.settings);
+    b.settings = Cat.applyGroups(b.settings, { masks: [mask] }, ['masks']);
+    const res = await M.retarget(b), m = b.settings.masks[0];
+    const out = { redone: res.redone, ownMap: m.map.id !== f.map.id && m.map.of === b.id, again: (await M.retarget(b)).redone, seen: (await M.describe(a)).map(d => d.label) };
+    b.settings = keep;
+    return out;
+  });
+  assert(r.redone === 1 && r.ownMap && r.again === 0, JSON.stringify(r));
+  assert(r.seen.includes('sky') || r.seen.includes('building'), 'the scene model saw: ' + r.seen.join(', '));
+  return 'keyword suggestions for the building: ' + r.seen.join(', ');
+});
+
+test('smart collections follow the catalog', async () => {
+  const r = await page(() => {
+    const Cat = PJ.Catalog, App = PJ.App, p = Cat.state.photos.find(x => x.name === 'gradient.jpg');
+    const c = Cat.addCollection('Four stars', [], { minRating: 4 });
+    App.library.setSource('col:' + c.id);
+    const before = App.library.visible().length; p.rating = 5; const after = App.library.visible().map(x => x.name);
+    Cat.addToCollection(c.id, [p.id]); const manual = c.photoIds.length;
+    p.rating = 0; Cat.removeCollection(c.id); App.library.setSource('all');
+    return { before, after, manual };
+  });
+  assert(r.before === 0 && r.after.length === 1 && r.after[0] === 'gradient.jpg' && r.manual === 0, JSON.stringify(r));
+});
+
+test('export queue: two jobs run one after the other; JPEG XL', async () => {
+  const r = await page(async (dir) => {
+    const X = PJ.Exporter, A = PJ.API, p = PJ.Catalog.state.photos.find(x => x.name === 'gradient.jpg');
+    const o = (extra) => Object.assign({}, X.DEFAULTS, { dest: 'choose', folder: dir, reveal: false, conflict: 'overwrite', resize: 'long', long: 800 }, extra);
+    const a = X.run([p], o({ format: 'jxl', quality: 80, template: 'q-jxl' }), false), b = X.run([p], o({ format: 'jpeg', template: 'q-jpg' }), false);
+    const queued = X.queueLength(), blocked = !!document.querySelector('.modal-back');
+    await a; await b;
+    const sep = String.fromCharCode(92), jxl = await A.readFile(dir + sep + 'q-jxl.jxl'), jpg = await A.fileSize(dir + sep + 'q-jpg.jpg');
+    return { queued, blocked, left: X.queueLength(), sig: [jxl[0], jxl[1]], jxl: jxl.length, jpg, failed: [...document.querySelectorAll('.modal')].map(m => m.textContent).filter(t => /errors/.test(t)) };
+  }, outDir);
+  assert(r.queued === 2 && !r.blocked && r.left === 0, JSON.stringify(r));
+  assert(!r.failed.length, r.failed.join(' '));
+  assert(r.sig[0] === 0xff && r.sig[1] === 0x0a && r.jxl > 2000, 'not a JPEG XL file: ' + JSON.stringify(r));
+  assert(r.jpg > 2000, 'the second job wrote nothing');
+  return `JPEG XL ${(r.jxl / 1024).toFixed(0)} KB against JPEG ${(r.jpg / 1024).toFixed(0)} KB`;
+});
+
+test('catalog clean-up counts only what nothing refers to', async () => {
+  const r = await page(async () => {
+    const A = PJ.API, App = PJ.App;
+    if (!A.cleanStore) return { skipped: true };
+    const u = await A.cleanStore(App.storeKeys(), false, false), none = await A.cleanStore([], false, false);
+    return { orphans: u.orphans, thumbs: u.thumbs, removed: u.removed, withoutKeys: none.orphans };
+  });
+  if (r.skipped) return 'skipped';
+  assert(r.removed === 0 && r.thumbs > 0, JSON.stringify(r));
+  return `${r.thumbs} files in the store, ${r.orphans} unreferenced`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));
