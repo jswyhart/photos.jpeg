@@ -118,8 +118,9 @@
     const fit = fitConvergence(found.lines, found.w);
     if (!fit || fit.n < 4 || fit.spread < 0.3) throw new Error('Not enough straight vertical lines across the photo to work out the perspective');
     const half = Math.max(found.w, found.h) / 2;
-    // tilt grows by a per pixel of position: the lines meet 1/a above (or below) the centre
-    let vertical = Math.round(-fit.a * half / KV * 100);
+    // tilt grows by a per pixel of position: the lines meet 1/a from the centre. The pipeline's Vertical
+    // spreads the picture by (1 + kv·y / half) across, which adds −kv / half to that growth: cancel it.
+    let vertical = Math.round(fit.a * half / KV * 100);
     let rotate = Math.round(Math.atan(fit.b) * 180 / Math.PI * 10) / 10;
     if (Math.abs(vertical) > 100 || Math.abs(rotate) > 10) throw new Error('The lines in this photo lean too far to straighten automatically');
     if (Math.abs(vertical) < 2) vertical = 0;

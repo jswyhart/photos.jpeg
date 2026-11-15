@@ -695,7 +695,24 @@
       h('button', { class: 'btn sm', title: 'Rotate right (])', onclick: () => PJ.App.rotate(90) }, icon('rotate-right'), 'Right'),
       h('button', { class: 'btn sm', title: 'Flip horizontal', onclick: () => PJ.App.flip('h') }, icon('left-right'), 'Flip H'),
       h('button', { class: 'btn sm', title: 'Flip vertical', onclick: () => PJ.App.flip('v') }, icon('up-down'), 'Flip V'));
-    transPanel.body.append(orientRow,
+    const uprightBtn = h('button', {
+      class: 'btn sm', title: 'Find the vertical lines in the photo (buildings, door frames) and set Vertical, Rotate and Scale so they stand straight',
+      onclick: async () => {
+        const p = photo;
+        if (!p) return;
+        uprightBtn.disabled = true;
+        try {
+          const m = await PJ.Upright.measure(p);
+          if (!m.vertical && !m.rotate) { UI.toast('The vertical lines in this photo are already straight', 'circle-info'); return; }
+          PJ.Upright.applyTo(p, m);
+          Cat.commit(p, 'Auto upright');
+          if (p === photo) { viewer.update('commit'); syncAll(); }
+          UI.toast(`Straightened using ${m.lines} vertical lines`);
+        } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
+        finally { uprightBtn.disabled = false; }
+      }
+    }, icon('building'), 'Auto upright');
+    transPanel.body.append(orientRow, h('div', { class: 'btnrow', style: { marginTop: 0, marginBottom: '10px' } }, uprightBtn),
       bslider('transform.vertical', 'Vertical', -100, 100),
       bslider('transform.horizontal', 'Horizontal', -100, 100),
       bslider('transform.rotate', 'Rotate', -10, 10, { step: 0.1, decimals: 1 }),
