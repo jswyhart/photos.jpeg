@@ -229,7 +229,12 @@
     if (Cat.pref('nr.autoIso', false)) added.forEach(p => { if (p.kind !== 'video') p.autoNr = true; });
     library.setLastImport(added.map(p => p.id));
     // once faces are in use, new photos are looked through as they arrive (in the background)
-    if (PJ.Faces && Cat.pref('faces.auto', false)) PJ.Faces.scan(added).catch(() => { });
+    if (PJ.Faces && Cat.pref('faces.auto', false)) PJ.Faces.scan(added).then((r) => {
+      if (!r || !r.faces) return;
+      // new faces that look like someone already named: say so, the naming dialog has the names filled in
+      const known = PJ.Faces.groups().filter(g => g.suggest && g.faces.some(e => added.includes(e.photo)));
+      if (known.length) UI.toast(`${r.faces} new face${r.faces === 1 ? '' : 's'} · looks like ${[...new Set(known.map(g => g.suggest.name))].slice(0, 3).join(', ')} — People → Faces without a name to confirm`, 'user');
+    }).catch(() => { });
     library.setSource('recent');
     refresh();
     setActive(added[0].id);

@@ -112,8 +112,8 @@
     function geoSig(s) { return JSON.stringify([s.geo, s.transform, s.lens.distortion, s.lens.pr, s.lens.p1, s.lens.p2, s.lens.p3, s.lens.p4, st.tool === 'crop']); }
     function renderOpts(extra) {
       // soft proof: the picture as an sRGB file or screen will show it, with what sRGB cannot hold marked
-      const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS && !st.proof ? 'p3' : 'srgb' };
-      if (st.proof) o.gamutWarn = true;
+      const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS && st.proof !== 'srgb' ? 'p3' : 'srgb' };
+      if (st.proof) o.gamutWarn = st.proof;                 // 'srgb' | 'adobe'
       if (st.tool === 'crop') {
         const s = srcInfo();
         // crop override must be expressed for the level being rendered; normalized so identical

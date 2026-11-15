@@ -188,6 +188,8 @@
    * brought into sRGB first, exactly as before wide colour existed, so earlier edits look the same. */
   const SRGB_TO_P3 = [0.8224621, 0.1775380, 0, 0.0331941, 0.9668058, 0, 0.0170827, 0.0723974, 0.9105199];
   const P3_TO_SRGB = [1.2249401, -0.2249404, 0, -0.0420569, 1.0420571, 0, -0.0196376, -0.0786361, 1.0982735];
+  // linear Display P3 → linear Adobe RGB (1998), both D65: (sRGB → Adobe RGB) · (P3 → sRGB)
+  const P3_TO_ADOBE = [0.8640521, 0.1359477, 0, -0.0420569, 1.0420571, 0, -0.0205604, -0.0325062, 1.0530665];
   function mul3(a, b) {
     const o = new Array(9);
     for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
@@ -1385,7 +1387,8 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn, check) {
+    if (check) gamutTables();
     if (conv) gamutTables();
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
     const outw = Math.max(1, reg0.w), outh = Math.max(1, reg0.h);
@@ -1400,6 +1403,12 @@
       for (let k = 0; k < outw; k++, si++, di += 4) {
         let x = R[si], y = G[si], z = B[si];
         let outside = false;
+        if (check) {
+          // soft proof for a space the screen is not narrowed to (Adobe RGB): the picture stays as it is, what that space cannot hold is marked
+          const lr = fLin(x), lg = fLin(y), lb = fLin(z);
+          const cr = check[0] * lr + check[1] * lg + check[2] * lb, cg = check[3] * lr + check[4] * lg + check[5] * lb, cb = check[6] * lr + check[7] * lg + check[8] * lb;
+          if (cr < -0.004 || cg < -0.004 || cb < -0.004 || cr > 1.004 || cg > 1.004 || cb > 1.004) outside = true;
+        }
         if (conv) {
           const lr = fLin(x), lg = fLin(y), lb = fLin(z);
           const cr = conv[0] * lr + conv[1] * lg + conv[2] * lb, cg = conv[3] * lr + conv[4] * lg + conv[5] * lb, cb = conv[6] * lr + conv[7] * lg + conv[8] * lb;
@@ -1547,7 +1556,7 @@
     // 8. Output
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
-    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn);
+    const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn, wide && opts.outSpace === 'p3' && opts.gamutWarn === 'adobe' ? P3_TO_ADOBE : null);
     return {
       space: wide && opts.outSpace === 'p3' ? 'p3' : 'srgb',
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,

@@ -747,11 +747,15 @@
       UI.toast(v ? 'Edited in Display P3: colours beyond sRGB are kept for wide-colour screens and exports' : 'Edited in sRGB', 'palette');
     });
     const wideRow = h('div', { class: 'wide-row', title: 'For RAW photos and photos saved in Display P3 (most phones). Keeps the colours recorded beyond sRGB. Turning it on or off can shift strongly saturated colours slightly.' }, wideChk.el);
-    const proofChk = UI.checkbox('Soft proof as sRGB', false, (v) => {
-      viewer.st.proof = !!v; viewer.update('commit');
-      if (v) UI.toast('Showing the photo as an sRGB file or screen will; colours sRGB cannot hold are marked in magenta', 'eye');
+    const proofSel = h('select', { title: 'Only changes what you see here, not the photo' },
+      h('option', { value: '' }, 'Soft proof: off'), h('option', { value: 'srgb' }, 'Soft proof: sRGB'), h('option', { value: 'adobe' }, 'Soft proof: Adobe RGB'));
+    proofSel.addEventListener('change', () => {
+      viewer.st.proof = proofSel.value || false; viewer.update('commit');
+      if (proofSel.value === 'srgb') UI.toast('Showing the photo as an sRGB file or screen will; colours sRGB cannot hold are marked in magenta', 'eye');
+      if (proofSel.value === 'adobe') UI.toast('Colours an Adobe RGB export cannot hold are marked in magenta', 'eye');
     });
-    const proofRow = h('div', { class: 'wide-row', title: 'Only changes what you see here, not the photo. For wide-colour photos: how an sRGB export will look, with out-of-gamut colours in magenta.' }, proofChk.el);
+    const proofChk = { set: (v) => { proofSel.value = v || ''; } };
+    const proofRow = h('div', { class: 'wide-row' }, proofSel);
     const hasP3 = () => { const src = photo && E.cachedSource(photo); return !!(photo && photo.kind !== 'video' && (photo.isRaw || (src && src.input && src.input.space === 'p3'))); };
     controls.push({ sync: () => {
       const on = hasP3();

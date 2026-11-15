@@ -217,6 +217,13 @@
           UI.menu(e.clientX, e.clientY, [
             { label: 'Show faces…', icon: 'user', action: () => personFaces(who) },
             { label: 'Rename…', icon: 'pen', action: async () => { const n = await UI.prompt('Rename person', who.name); if (n) { F.rename(who.id, n); if (!F.person(who.id) && view.source === key) setSource('all'); else renderLeft(); } } },
+            ...(F.people().length > 1 ? [{ label: 'Same person as…', icon: 'people-arrows', action: () => {
+              // two entries that turned out to be one person: this one's faces go to the other
+              const r = li.getBoundingClientRect();
+              UI.menu(r.right, r.top, F.people().filter(o => o.id !== who.id).sort((a, b) => a.name.localeCompare(b.name)).map(o => ({
+                label: o.name, icon: 'user', action: () => { F.rename(who.id, o.name); UI.toast(`${who.name} and ${o.name} are now one person`, 'user'); if (view.source === key) setSource('person:' + o.id); else renderLeft(); }
+              })));
+            } }] : []),
             { label: 'Remove this person', icon: 'trash-can', action: () => { F.remove(who.id); if (view.source === key) setSource('all'); else renderLeft(); } }
           ]);
         });
