@@ -1130,6 +1130,7 @@
         h('h4', null, 'Performance'),
         row('GPU previews', gpu.off ? 'Not available on this computer (no hardware WebGL2)' : 'Sliders render on the graphics card while you drag; the final image is always rendered exactly.', chk('gpu.preview', true)),
         row('RAW files', API.platform === 'macos' ? 'macOS develops RAW files with Core Image.' : 'NEF, CR2, ARW and DNG files are developed from the sensor data.', API.platform === 'macos' ? h('span') : rawSel),
+        row('Develop JPEG XL DNG files (experimental)', 'Galaxy S23 and later store RAW as JPEG XL inside the DNG. On: developed from that data (about half a minute per photo; flatter than the camera JPEG, faint rings can show in skies). Off: the embedded preview is used.', chk('raw.jxlDng', false)),
         row('Wide colour for new photos', 'RAW photos and photos saved in Display P3 (most phones) that are added from now on are edited in Display P3. Each photo can be switched in Develop → Calibration.', chk('raw.wide', true)),
         row('Look for faces in new photos', 'Photos are looked through for faces as they are imported, on this computer. Turns itself on the first time you use People → Find faces.', chk('faces.auto', false)),
         h('h4', null, 'Import'),

@@ -40,7 +40,7 @@ self.onmessage = (e) => {
         return;
       }
       if (msg.op === 'rawA') {
-        const r = PJ.RawDec.phaseA(msg.key, new Uint8Array(msg.buffer));
+        const r = PJ.RawDec.phaseA(msg.key, new Uint8Array(msg.buffer), msg.pre);
         self.postMessage({ type: 'result', id: msg.id, raw: r }, [r.cells.buffer]);
         return;
       }

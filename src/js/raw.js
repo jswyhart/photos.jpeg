@@ -135,6 +135,54 @@
   }
 
   /**
+   * Where the JPEG XL picture of a DNG is, when the file has one this app can use: the full-size image,
+   * already demosaiced (three samples per pixel), in a single piece. → { offset, length, width, height } or null.
+   */
+  function jxlInDng(bytes) {
+    try {
+      if (bytes.length < 16 || !((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4d && bytes[1] === 0x4d))) return null;
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), le = bytes[0] === 0x49;
+      const u16 = (o) => dv.getUint16(o, le), u32 = (o) => dv.getUint32(o, le);
+      if (u16(2) !== 42) return null;
+      const seen = new Set(); let best = null;
+      const walk = (o, depth) => {
+        if (!o || o + 2 > bytes.length || seen.has(o) || depth > 3) return;
+        seen.add(o);
+        const n = u16(o), t = {};
+        for (let i = 0; i < n; i++) {
+          const e = o + 2 + i * 12; if (e + 12 > bytes.length) return;
+          const tag = u16(e), type = u16(e + 2), cnt = u32(e + 4), size = type === 3 ? 2 : type === 4 || type === 13 ? 4 : 1;
+          const at = cnt * size <= 4 ? e + 8 : u32(e + 8);
+          t[tag] = { cnt, val: type === 3 ? u16(at) : type === 4 || type === 13 ? u32(at) : bytes[at], at, type };
+        }
+        if (t[259] && t[259].val === 52546 && t[262] && t[262].val === 34892 && t[277] && t[277].val === 3 && t[273] && t[273].cnt === 1 && t[279] && !(t[254] && (t[254].val & 1))) {
+          const c = { offset: t[273].val, length: t[279].val, width: t[256].val, height: t[257].val };
+          if (c.offset + c.length <= bytes.length && c.width * c.height <= 64e6 && (!best || c.width * c.height > best.width * best.height)) best = c;
+        }
+        if (t[330]) for (let k = 0; k < Math.min(8, t[330].cnt); k++) walk(t[330].cnt === 1 ? t[330].val : u32(t[330].at + k * 4), depth + 1);
+        walk(u32(o + 2 + n * 12), depth);
+      };
+      walk(u32(4), 0);
+      return best;
+    } catch (_) { return null; }
+  }
+  /** Decode a JPEG XL image at its full bit depth (js/jxlrawworker.js). The thread is closed afterwards: it holds over a gigabyte for a 50-megapixel picture. */
+  function decodeJxl(data, width, height, photo) {
+    return new Promise((resolve, reject) => {
+      const wk = new Worker(new URL('js/jxlrawworker.js', location.href).href, { type: 'module' });
+      const done = (fn, v) => { try { wk.terminate(); } catch (_) { } PJ.UI && PJ.UI.activity && PJ.UI.activity('', 0); fn(v); };
+      wk.onmessage = (ev) => {
+        const m = ev.data;
+        if (m.progress != null) { if (PJ.UI && PJ.UI.activity) PJ.UI.activity(`Reading ${photo.name} (JPEG XL RAW)…`, m.progress); return; }
+        if (m.error) done(reject, new Error('JPEG XL RAW: ' + m.error)); else done(resolve, { data: m.rgb16, width: m.width, height: m.height });
+      };
+      wk.onerror = (ev) => done(reject, new Error('The JPEG XL decoder could not be started' + (ev && ev.message ? ': ' + ev.message : '')));
+      const copy = data.slice();
+      wk.postMessage({ id: 1, data: copy, width, height }, [copy.buffer]);
+    });
+  }
+
+  /**
    * Develop a RAW file. Returns { pixels, input, width, height, note } or throws (caller falls back to the preview).
    * preview: the decoded embedded JPEG (upright) used to match colour.
    */
@@ -142,7 +190,12 @@
     const pool = PJ.Engine.pool;
     const key = photo.path + '|' + (opts && opts.half ? 'h' : 'f') + '|' + Date.now();
     const buf = bytes.slice().buffer;
-    const a = await pool.task({ op: 'rawA', key, buffer: buf }, [buf], 1);
+    // a DNG whose picture is one JPEG XL image (newer phones): that is decoded first, in its own thread
+    let pre = null;
+    // (opt-in: Preferences → RAW. It is slow, and these files do not yet come out as well as the camera's own JPEG)
+    const jx = PJ.Catalog.pref('raw.jxlDng', false) ? jxlInDng(bytes) : null;
+    if (jx) pre = await decodeJxl(bytes.subarray(jx.offset, jx.offset + jx.length), jx.width, jx.height, photo);
+    const a = await pool.task(pre ? { op: 'rawA', key, buffer: buf, pre } : { op: 'rawA', key, buffer: buf }, pre ? [buf, pre.data.buffer] : [buf], 1);
     const info = a.raw, worker = a.worker;
     const gw = info.gw, gh = info.gh, orientation = info.orientation || 1;
     const cam = [];
@@ -303,5 +356,5 @@
     return [Math.max(0, r), Math.max(0, g), Math.max(0, b)];
   }
 
-  global.PJ.Raw = { canDecode, develop, sourceLinear, DECODABLE };
+  global.PJ.Raw = { canDecode, develop, sourceLinear, jxlInDng, DECODABLE };
 })(window);

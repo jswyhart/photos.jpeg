@@ -359,10 +359,15 @@
       if (!d) throw new Error('DNG without raw image');
       W = r.one(d, 256, 0); H = r.one(d, 257, 0); bps = r.one(d, 258, 16);
       const comp = r.one(d, 259, 1), ph = r.one(d, 262, 32803), spp = r.one(d, 277, 1);
-      if (comp !== 1 && comp !== 7) throw new Error(`DNG compression ${comp} not supported here`);
-      const data = new Uint16Array(W * H * spp);
+      const jxl = comp === 52546 && preDecoded && preDecoded.width === W && preDecoded.height === H && spp === 3 && preDecoded.data.length === W * H * 3;
+      if (comp !== 1 && comp !== 7 && !jxl) throw new Error(`DNG compression ${comp} not supported here`);
+      const data = jxl ? preDecoded.data : new Uint16Array(W * H * spp);
       const tileW = r.one(d, 322, 0);
-      if (tileW) {
+      if (jxl) {
+        // decoded to the full 16-bit range: back to the file's own scale (its white level)
+        const wl = (r.get(d, 50717, 1) || [(1 << bps) - 1])[0], k = wl / 65535;
+        for (let i = 0; i < data.length; i++) data[i] = data[i] * k + 0.5;
+      } else if (tileW) {
         const tw = tileW, th = r.one(d, 323, H), offs = r.get(d, 324), cnts = r.get(d, 325);
         const across = Math.ceil(W / tw);
         offs.forEach((o, k) => {
@@ -790,8 +795,12 @@
 
   /* ---------------- worker entry points ---------------- */
   let cached = null; // { key, info }
-  function phaseA(key, bytes) {
-    const info = decodeMosaic(bytes);
+  /** pre: picture data that was decoded beforehand ({ data: Uint16Array 0…65535, width, height }) — JPEG XL inside a DNG. */
+  let preDecoded = null;
+  function phaseA(key, bytes, pre) {
+    preDecoded = pre || null;
+    let info;
+    try { info = decodeMosaic(bytes); } finally { preDecoded = null; }
     const cm = cameraMatrix(info);
     if (cm && cm.tblBlack > 0 && !info.dng && !info.black) info.black = cm.tblBlack;
     if (cm && cm.tblMax > 0 && !info.dng && cm.tblMax < info.white) info.white = cm.tblMax;
