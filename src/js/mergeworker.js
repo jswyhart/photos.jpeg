@@ -80,7 +80,7 @@ function grow(src, w2, h2, w, h) {
   }
   return out;
 }
-function hdr(id) {
+function hdr(id, linear) {
   const K = imgs.length;
   if (K < 2) throw new Error('Choose at least two exposures of the same scene');
   const w = imgs[0].w, h = imgs[0].h, N = w * h;
@@ -119,7 +119,7 @@ function hdr(id) {
   // Things that moved between the exposures (people, leaves, cars) would show as ghosts. Where an
   // exposure disagrees with the middle one beyond what the difference in exposure explains, it is left
   // out there and the middle exposure decides.
-  const ghost = [], ghostShare = [];
+  const ghost = [], ghostShare = [], gains = new Array(K).fill(1);      // gains: how much more light each frame took in than the middle one
   {
     const R = sm[ref], lin = (v) => Math.pow(v / 255, 2.2), okv = (v) => v > 20 && v < 235;
     for (let k = 0; k < K; k++) {
@@ -128,9 +128,10 @@ function hdr(id) {
       const at = (x, y) => S.d[Math.min(S.h - 1, Math.max(0, y + oy)) * S.w + Math.min(S.w - 1, Math.max(0, x + ox))];
       const ratios = [];
       for (let y = 0; y < R.h; y += 2) for (let x = 0; x < R.w; x += 2) { const a = R.d[y * R.w + x], b = at(x, y); if (okv(a) && okv(b)) ratios.push(lin(b) / lin(a)); }
-      if (ratios.length < 200) { ghost.push(null); ghostShare.push(0); continue; }       // too little in common to judge
+      if (ratios.length < 200) { gains[k] = Math.pow(Math.max(1e-3, mean[k]) / Math.max(1e-3, mean[ref]), 2.2); ghost.push(null); ghostShare.push(0); continue; }       // too little in common to judge
       ratios.sort((p, q) => p - q);
       const g = ratios[ratios.length >> 1], raw = new Float32Array(n);
+      gains[k] = g;
       // judged colour by colour: something of the same brightness but another colour has moved just as much
       const A = imgs[ref].rgb, B = imgs[k].rgb, st = R.step, fx = shift[k][0], fy = shift[k][1];
       for (let y = 0; y < R.h; y++) for (let x = 0; x < R.w; x++) {
@@ -150,6 +151,51 @@ function hdr(id) {
       if (cnt > n * 0.4) { ghost.push(null); ghostShare.push(0); continue; }
       ghost.push(soft); ghostShare.push(+(cnt / n).toFixed(4));
     }
+  }
+  if (linear) {
+    // The scene's light itself, as far as the frames tell it: each frame is taken back to linear light,
+    // divided by how much more (or less) it was exposed than the middle one, and the frames are averaged
+    // with most weight where a frame is neither near black nor near white. Highlights that are blown in
+    // the middle frame come from the darker ones and end up above 1; the file keeps that room
+    // (`headroom`) so the editor's Highlights and Exposure can bring them back.
+    const headroom = Math.min(16, Math.max(1, ...gains.map(g => 1 / Math.max(1e-3, g))));
+    const lut = new Float32Array(256), hat = new Float32Array(256);
+    for (let i = 0; i < 256; i++) { lut[i] = Math.pow(i / 255, 2.2); hat[i] = Math.max(0, 1 - Math.pow(2 * i / 255 - 1, 12)); }
+    const out = new Uint16Array(N * 3), order2 = gains.map((g, i) => i).sort((a, b) => gains[a] - gains[b]), darkest = order2[0], brightest = order2[K - 1];
+    const scale = 65535 / headroom;
+    for (let y = 0; y < h; y++) {
+      if ((y & 255) === 0) say(0.3 + 0.65 * y / h, 'Merging the light');
+      const gy = Math.min(sm[ref].h - 1, (y / sm[ref].step) | 0) * sm[ref].w;
+      for (let x = 0; x < w; x++) {
+        const gi = gy + Math.min(sm[ref].w - 1, (x / sm[ref].step) | 0), o = (y * w + x) * 3;
+        for (let c = 0; c < 3; c++) {
+          let sum = 0, ws = 0, vRef = 0;
+          for (let k = 0; k < K; k++) {
+            const [sx, sy] = shift[k], v = imgs[k].rgb[(Math.min(h - 1, Math.max(0, y + sy)) * w + Math.min(w - 1, Math.max(0, x + sx))) * 3 + c];
+            if (k === ref) vRef = v;
+            let wk = hat[v] + (k === ref ? 0.02 : 0);
+            if (ghost[k]) wk *= 1 - 0.995 * ghost[k][gi];
+            sum += wk * lut[v] / gains[k]; ws += wk;
+          }
+          let val;
+          if (ws > 1e-3) val = sum / ws;
+          else {
+            // every frame is at an end here: blown → the darkest frame knows most, black → the brightest
+            const k = vRef > 128 ? darkest : brightest, [sx, sy] = shift[k];
+            val = lut[imgs[k].rgb[(Math.min(h - 1, Math.max(0, y + sy)) * w + Math.min(w - 1, Math.max(0, x + sx))) * 3 + c]] / gains[k];
+          }
+          const q = val * scale;
+          out[o + c] = q < 0 ? 0 : q > 65535 ? 65535 : q + 0.5;
+        }
+      }
+    }
+    // a small copy of the middle frame goes into the file as its preview: the editor matches its starting look to it
+    const pk = Math.max(1, Math.ceil(Math.max(w, h) / 1600)), pw = Math.floor(w / pk), ph = Math.floor(h / pk), prev = new Uint8Array(pw * ph * 3), A = imgs[ref].rgb;
+    for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) for (let c = 0; c < 3; c++) {
+      let a = 0; for (let dy = 0; dy < pk; dy++) for (let dx = 0; dx < pk; dx++) a += A[((y * pk + dy) * w + x * pk + dx) * 3 + c];
+      prev[(y * pw + x) * 3 + c] = a / (pk * pk) + 0.5;
+    }
+    return { w, h, rgb16: out, stats: { shifts: shift, reference: ref, align, ghost: ghostShare, gains: gains.map(g => +g.toFixed(3)), headroom: +headroom.toFixed(3) }, preview: { w: pw, h: ph, rgb: prev } };
   }
   // What "well exposed" means depends on the place: a sky should end up light and a shadow dark, only
    // less extremely so than in any single exposure. The aim for each place comes from how bright it is
@@ -415,9 +461,9 @@ if (typeof self !== 'undefined' && typeof window === 'undefined' && typeof self.
     try {
       if (m.op === 'reset') { imgs = []; return; }
       if (m.op === 'image') { imgs.push({ w: m.w, h: m.h, rgb: m.rgb }); return; }
-      const r = m.op === 'hdr' ? hdr(m.id) : pano(m.id, m.focal, m.maxPixels || 40e6);
+      const r = m.op === 'hdr' ? hdr(m.id, !!m.linear) : pano(m.id, m.focal, m.maxPixels || 40e6);
       imgs = [];
-      self.postMessage({ id: m.id, w: r.w, h: r.h, rgb16: r.rgb16, stats: r.stats }, [r.rgb16.buffer]);
+      self.postMessage({ id: m.id, w: r.w, h: r.h, rgb16: r.rgb16, stats: r.stats, preview: r.preview || null }, r.preview ? [r.rgb16.buffer, r.preview.rgb.buffer] : [r.rgb16.buffer]);
     } catch (e) { imgs = []; self.postMessage({ id: m.id, error: String(e && e.message || e) }); }
   };
 }

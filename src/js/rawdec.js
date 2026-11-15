@@ -654,7 +654,7 @@
         const sx = crop.x + (half ? x * 2 : x), sy = crop.y + (half ? y * 2 : y), i = (sy * W + sx) * spp;
         const r = Math.max(0, data[i] - info.black) * g0, gg = Math.max(0, data[i + 1] - info.black) * g1, b = Math.max(0, data[i + 2] - info.black) * g2;
         const clipped = data[i] >= info.white || data[i + 1] >= info.white || data[i + 2] >= info.white;
-        emit((y * ow + x) * 4, Math.min(r, clipAt[0]), Math.min(gg, clipAt[1]), Math.min(b, clipAt[2]), clipped);
+        emit((y * ow + x) * 4, Math.min(r, clipAt[0] * lift), Math.min(gg, clipAt[1] * lift), Math.min(b, clipAt[2] * lift), clipped);
       }
       return { data: out, width: ow, height: oh };
     }

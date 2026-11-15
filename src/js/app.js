@@ -725,7 +725,60 @@
    * of one scene, 'pano' joins overlapping photos. Each photo goes in as it is developed now; the result
    * is written as a 16-bit TIFF next to the first photo and added to the catalog. opts.dir overrides the folder.
    */
+  /**
+   * A DNG holding demosaiced, linear picture data (16 bits per channel, sRGB primaries) with a JPEG
+   * preview — the form an HDR merge is kept in when its full range should stay editable. headroom: how
+   * many times brighter than the middle exposure's white the data can go. The file's BaselineExposure lifts
+   * the data by at most 2.6×: the editor keeps about that much room above white, so with more headroom
+   * than that the picture is stored a little darker instead and the brightest light still fits.
+   */
+  function linearDng(w, h, rgb16, headroom, jpeg, pw, ph) {
+    const ifd = (tags, at) => {
+      // tags: [tag, type, count, value(s)]; data that does not fit in 4 bytes is placed after the directory
+      tags.sort((a, b) => a[0] - b[0]);
+      const size = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 10: 8 }, dir = new Uint8Array(2 + tags.length * 12 + 4), dv = new DataView(dir.buffer), extra = [];
+      let off = at + dir.length;
+      dv.setUint16(0, tags.length, true);
+      tags.forEach(([tag, type, count, val], i) => {
+        const e = 2 + i * 12; dv.setUint16(e, tag, true); dv.setUint16(e + 2, type, true); dv.setUint32(e + 4, count, true);
+        const vals = Array.isArray(val) ? val : [val], bytes = new Uint8Array(count * size[type]), b = new DataView(bytes.buffer);
+        for (let k = 0; k < count; k++) {
+          if (type === 1 || type === 2) bytes[k] = typeof vals[k] === 'string' ? vals[k].charCodeAt(0) : vals[k] || 0;
+          else if (type === 3) b.setUint16(k * 2, vals[k], true);
+          else if (type === 4) b.setUint32(k * 4, vals[k], true);
+          else if (type === 5) { b.setUint32(k * 8, Math.round(vals[k] * 10000), true); b.setUint32(k * 8 + 4, 10000, true); }
+          else if (type === 10) { b.setInt32(k * 8, Math.round(vals[k] * 10000), true); b.setInt32(k * 8 + 4, 10000, true); }
+        }
+        if (bytes.length <= 4) dir.set(bytes, e + 8);
+        else { dv.setUint32(e + 8, off, true); extra.push(bytes); off += bytes.length + (bytes.length & 1); }
+      });
+      const out = new Uint8Array(off - at); out.set(dir, 0);
+      let o = dir.length; for (const x of extra) { out.set(x, o); o += x.length + (x.length & 1); }
+      return out;
+    };
+    const str = (s) => [s.length + 1, (s + '\0').split('')];
+    const [nMake, vMake] = str('photos.jpeg'), [nModel, vModel] = str('HDR merge');
+    // lay the file out: header, preview JPEG, raw data, then the two directories (their offsets are known by then)
+    const jpegAt = 8, rawAt = jpegAt + jpeg.length + (jpeg.length & 1), rawLen = rgb16.length * 2, subAt = rawAt + rawLen;
+    const sub = ifd([[254, 4, 1, 0], [256, 4, 1, w], [257, 4, 1, h], [258, 3, 3, [16, 16, 16]], [259, 3, 1, 1], [262, 3, 1, 34892], [273, 4, 1, rawAt], [277, 3, 1, 3], [278, 4, 1, h], [279, 4, 1, rawLen], [284, 3, 1, 1],
+      [50714, 3, 3, [0, 0, 0]], [50717, 4, 3, [65535, 65535, 65535]]], subAt);
+    const mainAt = subAt + sub.length;
+    const main = ifd([[254, 4, 1, 1], [256, 4, 1, pw], [257, 4, 1, ph], [258, 3, 3, [8, 8, 8]], [259, 3, 1, 7], [262, 3, 1, 6], [271, 2, nMake, vMake], [272, 2, nModel, vModel], [273, 4, 1, jpegAt], [274, 3, 1, 1], [277, 3, 1, 3], [278, 4, 1, ph], [279, 4, 1, jpeg.length],
+      [305, 2, ...str('photos.jpeg')], [330, 4, 1, subAt],
+      [50706, 1, 4, [1, 4, 0, 0]], [50707, 1, 4, [1, 1, 0, 0]], [50708, 2, ...str('photos.jpeg HDR merge')],
+      // XYZ (D65) → the data's own colours, which are linear sRGB
+      [50721, 10, 9, [3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108, 0.0415560, 0.0556434, -0.2040259, 1.0572252]],
+      [50728, 5, 3, [1, 1, 1]], [50730, 10, 1, Math.log2(Math.max(1, Math.min(headroom, 2.6)))], [50778, 3, 1, 21]], mainAt);
+    const out = new Uint8Array(mainAt + main.length), dv = new DataView(out.buffer);
+    out[0] = out[1] = 0x49; dv.setUint16(2, 42, true); dv.setUint32(4, mainAt, true);
+    out.set(jpeg, jpegAt);
+    out.set(new Uint8Array(rgb16.buffer, rgb16.byteOffset, rawLen), rawAt);      // little-endian, as the header says
+    out.set(sub, subAt); out.set(main, mainAt);
+    return out;
+  }
+
   async function mergePhotos(kind, list, opts) {
+    const dng = kind === 'hdrDng'; if (dng) kind = 'hdr';
     const what = kind === 'hdr' ? 'HDR' : 'Panorama';
     const photos = (list || selectedPhotos()).filter(p => p.kind !== 'video' && !p.missing)
       .sort((a, b) => String(a.captureTime || '').localeCompare(String(b.captureTime || '')) || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -759,13 +812,20 @@
       const out = await new Promise((resolve, reject) => {
         wk.onmessage = (ev) => { const m = ev.data; if (m.progress != null) UI.activity(`${what}: ${m.text}`, 0.4 + 0.5 * m.progress); else if (m.error) reject(new Error(m.error)); else resolve(m); };
         wk.onerror = (ev) => { mergeWorker = null; reject(new Error('The merge stopped: ' + (ev && ev.message || 'not enough memory?'))); };
-        wk.postMessage({ op: kind, id: 1, focal, maxPixels: 40e6 });
+        wk.postMessage({ op: kind, id: 1, focal, maxPixels: 40e6, linear: dng });
       });
       UI.activity(`${what}: writing the file`, 0.93);
-      const bytes = PJ.Exporter.encodeTiffRich({ width: out.w, height: out.h, data16: out.rgb16 }, PJ.ICC ? PJ.ICC.profile('srgb') : null);
+      let bytes;
+      if (dng && out.preview) {
+        const pv = out.preview, c = PJ.Decode.makeCanvas(pv.w, pv.h), id = new ImageData(pv.w, pv.h);
+        for (let i = 0, q = 0; i < pv.w * pv.h; i++, q += 4) { id.data[q] = pv.rgb[i * 3]; id.data[q + 1] = pv.rgb[i * 3 + 1]; id.data[q + 2] = pv.rgb[i * 3 + 2]; id.data[q + 3] = 255; }
+        c.getContext('2d').putImageData(id, 0, 0);
+        const blob = c.convertToBlob ? await c.convertToBlob({ type: 'image/jpeg', quality: 0.9 }) : await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+        bytes = linearDng(out.w, out.h, out.rgb16, out.stats.headroom || 1, new Uint8Array(await blob.arrayBuffer()), pv.w, pv.h);
+      } else bytes = PJ.Exporter.encodeTiffRich({ width: out.w, height: out.h, data16: out.rgb16 }, PJ.ICC ? PJ.ICC.profile('srgb') : null);
       const first = photos[0], base = first.name.replace(/\.[^.]+$/, '');
       const dir = (opts && opts.dir) || API.dirname(first.path);
-      const written = await API.writeFile(API.joinPath(dir, `${base}-${kind === 'hdr' ? 'HDR' : 'Pano'}.tif`), bytes, 'unique');
+      const written = await API.writeFile(API.joinPath(dir, `${base}-${kind === 'hdr' ? 'HDR' : 'Pano'}.${dng ? 'dng' : 'tif'}`), bytes, 'unique');
       const path = (written && written.path) || written;
       UI.activity('');
       let added = [];
@@ -1285,7 +1345,7 @@
     autoTone: () => module === 'develop' ? develop.autoTone() : autoToneSelection(),
     lensProfile: lensProfileSelection,
     compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
-    mergeHdr: () => mergePhotos('hdr'), mergePano: () => mergePhotos('pano'),
+    mergeHdr: () => mergePhotos('hdr'), mergeHdrDng: () => mergePhotos('hdrDng'), mergePano: () => mergePhotos('pano'),
     toggleFaces: async () => {
       if (!PJ.Faces) return;
       const on = viewer.st.showFaces = !viewer.st.showFaces, p = activePhoto();

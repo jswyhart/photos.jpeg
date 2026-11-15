@@ -18,7 +18,7 @@ public static class Storage
     public static readonly HashSet<string> ImageExt = [.. Raw, .. Std];
     /// <summary>Everything the catalog can hold (photos + video).</summary>
     public static readonly HashSet<string> MediaExt = [.. Raw, .. Std, .. Video];
-    public static readonly HashSet<string> WriteExt = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "avif", "jxl", "json", "mp4", "mov"];
+    public static readonly HashSet<string> WriteExt = ["jpg", "jpeg", "png", "webp", "tif", "tiff", "avif", "jxl", "dng", "json", "mp4", "mov"];
     public static readonly HashSet<string> TextExt = ["cube", "xmp", "json", "pjpreset", "txt"];
 
     /// <summary>The import dialog's file filter.</summary>

@@ -416,6 +416,7 @@ public sealed class MainForm : Form
                 Cmd("Flip Vertical", "flipV"),
                 Sep(),
                 Cmd("Merge to HDR…", "mergeHdr"),
+                Cmd("Merge to HDR (editable DNG)…", "mergeHdrDng"),
                 Cmd("Merge to Panorama…", "mergePano"),
                 Sep(),
                 Sub("Set Rating", [.. Enumerable.Range(0, 6).Select(n => Cmd(n == 0 ? "None" : new string('★', n), $"rating:{n}", n.ToString()))]),
