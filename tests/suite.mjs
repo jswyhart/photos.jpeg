@@ -342,6 +342,113 @@ test('catalog clean-up counts only what nothing refers to', async () => {
   return `${r.thumbs} files in the store, ${r.orphans} unreferenced`;
 });
 
+test('wide colour: unmarked photos render as before, marked ones keep colours beyond sRGB', async () => {
+  const r = await page(() => {
+    const P = PJ.Pipeline, w = 16, h = 16, dec = P.inputLUT('rawlog');
+    // a developed RAW stand-in: codes in Display P3 primaries, with a strong red-orange that sRGB cannot hold
+    const p3 = new Uint8ClampedArray(w * h * 4), srgb = new Uint8ClampedArray(w * h * 4), M = P.P3_TO_SRGB;
+    for (let i = 0; i < w * h; i++) {
+      const c = i % 2 ? [200, 6, 6] : [90 + (i % 7) * 8, 100, 110 - (i % 5) * 6];
+      const l = c.map(v => dec[v]);
+      const s = [M[0] * l[0] + M[1] * l[1] + M[2] * l[2], M[3] * l[0] + M[4] * l[1] + M[5] * l[2], M[6] * l[0] + M[7] * l[1] + M[8] * l[2]];
+      for (let k = 0; k < 3; k++) { p3[i * 4 + k] = c[k]; srgb[i * 4 + k] = Math.round(P.rawLogEncode(Math.max(0, s[k])) * 255); }
+      p3[i * 4 + 3] = srgb[i * 4 + 3] = 255;
+    }
+    const lut = new Float32Array(256); for (let i = 0; i < 256; i++) lut[i] = Math.min(1, dec[i] / 6);
+    const go = (data, input, opts) => P.render({ src: { data, width: w, height: h }, settings: P.defaultSettings(), fullLongEdge: w, seed: 1, opts: Object.assign({ srcInput: input }, opts) });
+    const old = go(srgb, { lut, matrix: null }, {}), std = go(p3, { lut, matrix: null, space: 'p3' }, {});
+    const wideS = go(p3, { lut, matrix: null, space: 'p3' }, { wide: true }), wideP = go(p3, { lut, matrix: null, space: 'p3' }, { wide: true, outSpace: 'p3' });
+    const diff = (a, b) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Math.abs(a[i] - b[i])); return m; };
+    const back = wideP.data.slice(); PJ.ICC.convert(back, 'srgb', 4, 255, 'p3');
+    // the red pixel, taken back to linear sRGB: a negative channel means it lies outside sRGB
+    const lin = [0, 1, 2].map(k => P.toLin(wideP.data[4 + k] / 255)), g = M[3] * lin[0] + M[4] * lin[1] + M[5] * lin[2];
+    return { stdVsOld: diff(std.data, old.data), spaces: [std.space, wideS.space, wideP.space].join('/'), backVsWideS: diff(back, wideS.data), wideVsStd: diff(wideP.data, std.data), greenInSrgb: g };
+  });
+  assert(r.stdVsOld <= 3, `an unmarked photo no longer renders as it did: off by ${r.stdVsOld}`);
+  assert(r.spaces === 'srgb/srgb/p3', r.spaces);
+  assert(r.backVsWideS <= 1, `narrowing a P3 render to sRGB gives a different picture: ${r.backVsWideS}`);
+  assert(r.greenInSrgb < -0.005, `the test colour is not outside sRGB (${r.greenInSrgb})`);
+  return `unmarked matches the old rendering within ${r.stdVsOld}; the P3 render holds a colour outside sRGB`;
+});
+
+test('content-aware fill continues a pattern and is laid in through its soft edge', async () => {
+  const r = await page(async () => {
+    const P = PJ.Pipeline, w = 200, h = 160, truth = new Uint8Array(w * h * 3), rgb = new Uint8Array(w * h * 3), mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = Math.sin((x + y * 0.5) / 6) * 60 + 128, o = (y * w + x) * 3; truth[o] = v; truth[o + 1] = v * 0.8 + 20; truth[o + 2] = 255 - v; }
+    rgb.set(truth);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (Math.hypot(x - 100, y - 80) < 22) { mask[y * w + x] = 1; rgb[(y * w + x) * 3] = 255; rgb[(y * w + x) * 3 + 1] = 0; rgb[(y * w + x) * 3 + 2] = 255; }
+    const wk = new Worker(new URL('js/fillworker.js', location.href).href);
+    const out = await new Promise((res, rej) => { wk.onmessage = (e) => e.data.error ? rej(new Error(e.data.error)) : res(e.data.rgb); wk.onerror = (e) => rej(new Error(e.message)); wk.postMessage({ id: 1, w, h, rgb, mask }); });
+    wk.terminate();
+    let err = 0, n = 0, outside = 0;
+    for (let i = 0; i < w * h; i++) { if (mask[i]) { err += Math.abs(out[i * 3] - truth[i * 3]); n++; } else if (out[i * 3] !== truth[i * 3]) outside++; }
+    // the piece in a photo: a red patch with a soft-edged alpha over a grey picture
+    const W = 64, H = 64, src = new Uint8ClampedArray(W * H * 4).fill(128), map = new Uint8Array(16 * 16 * 4);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const o = (y * 16 + x) * 4; map[o] = 255; map[o + 1] = 0; map[o + 2] = 0; map[o + 3] = Math.hypot(x - 7.5, y - 7.5) < 5 ? 255 : 0; }
+    P.setMaskMap('cf_test', 16, 16, map);
+    const res = P.applySpots(src, W, H, [{ mode: 'fill', x: 0.5, y: 0.5, r: 0.05, pts: [[0.5, 0.5]], opacity: 100, patch: { id: 'cf_test', x: 16 / 64, y: 16 / 64, w: 32 / 64, h: 32 / 64 } }]);
+    const at = (x, y) => res[(y * W + x) * 4];
+    return { err: err / n, outside, centre: at(32, 32), corner: at(17, 17), far: at(4, 4), missing: P.applySpots(src, W, H, [{ mode: 'fill', pts: [[0.5, 0.5]], r: 0.05, patch: { id: 'nope', x: 0, y: 0, w: 1, h: 1 } }])[0] };
+  });
+  assert(r.err < 12 && r.outside === 0, `fill error ${r.err.toFixed(1)}, ${r.outside} pixels changed outside the hole`);
+  assert(r.centre === 255 && r.corner === 128 && r.far === 128 && r.missing === 128, JSON.stringify(r));
+  return `stripes continued with a mean error of ${r.err.toFixed(1)} levels`;
+});
+
+test('faces are grouped by person, named, and found by search', async () => {
+  const r = await page(async () => {
+    const F = PJ.Faces, Cat = PJ.Catalog, App = PJ.App, T = F._test, w = (ms) => new Promise(r => setTimeout(r, ms));
+    // two made-up people: directions in the 128 numbers, each face a little off its person's
+    let s = 5; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff - 0.5; };
+    const base = [0, 1].map(() => Float32Array.from({ length: 128 }, rnd));
+    const face = (k) => ({ b: [0.4, 0.3, 0.1, 0.1], q: 0.9, v: T.pack(base[k].map(v => v + rnd() * 0.5)) });
+    const ph = Cat.state.photos.filter(p => p.kind !== 'video').slice(0, 3);
+    ph[0].faces = [face(0), face(1)]; ph[1].faces = [face(0)]; ph[2].faces = [face(1), face(0)];
+    const g = F.groups(), sizes = g.map(x => x.faces.length).sort().join(',');
+    const who = F.name(g[0].faces, 'Zed Test');
+    const n1 = F.photosOf(who.id).length, left = F.unnamedCount();
+    const sug = F.groups().length;
+    App.setModule('library'); App.library.setSource('person:' + who.id); await w(200);
+    const shown = App.visible().length;
+    App.library.setSource('all'); await w(100);
+    const sim = T.similarity([[0, 0], [10, 0], [5, 5], [2, 8], [8, 8]], [[20, 10], [20, 30], [10, 20], [4, 14], [4, 26]]);
+    const names = F.namesIn(ph[0]).join();
+    F.remove(who.id); for (const p of ph) { delete p.faces; delete p.facesV; }
+    return { sizes, n1, left, sug, shown, names, sim: sim.map(v => +v.toFixed(3)), people: F.people().length };
+  });
+  assert(r.sizes === '2,3', `groups of ${r.sizes}`);
+  assert(r.n1 === 3 && r.left === 2 && r.sug === 1 && r.shown === 3 && r.names === 'Zed Test' && r.people === 0, JSON.stringify(r));
+  assert(Math.abs(r.sim[0]) < 0.01 && Math.abs(r.sim[1] - 2) < 0.01, 'the face alignment is off: ' + r.sim);
+  return 'two people told apart; naming one filed 3 photos under them';
+});
+
+test('HDR merge keeps both ends of the scene; a panorama joins overlapping photos', async () => {
+  const r = await page(async () => {
+    let s = 3; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const SW = 700, SH = 300, scene = new Float32Array(SW * SH * 3);
+    for (let i = 0; i < 400; i++) { const bx = rnd() * SW, by = rnd() * SH, rr = 4 + rnd() * 16, c = [rnd(), rnd(), rnd()]; for (let y = Math.max(0, by - rr | 0); y < Math.min(SH, by + rr); y++) for (let x = Math.max(0, bx - rr | 0); x < Math.min(SW, bx + rr); x++) if (Math.abs(x - bx) + Math.abs(y - by) < rr) for (let k = 0; k < 3; k++) scene[(y * SW + x) * 3 + k] = 0.15 + 0.7 * c[k]; }
+    const shot = (x0, w, h, e, light) => { const rgb = new Uint8Array(w * h * 3); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let k = 0; k < 3; k++) rgb[(y * w + x) * 3 + k] = Math.max(0, Math.min(255, 255 * Math.pow((scene[((y + 10) * SW + x + x0) * 3 + k] + 0.02) * e * (light ? light(x) : 1), 1 / 2.2))); return { w, h, rgb }; };
+    const wk = new Worker(new URL('js/mergeworker.js', location.href).href);
+    const run = (op, list, extra) => new Promise((res, rej) => {
+      wk.onmessage = (e) => { if (e.data.progress != null) return; e.data.error ? rej(new Error(e.data.error)) : res(e.data); };
+      wk.postMessage({ op: 'reset' }); for (const im of list) wk.postMessage({ op: 'image', w: im.w, h: im.h, rgb: im.rgb });
+      wk.postMessage(Object.assign({ op, id: 1 }, extra));
+    });
+    const light = (x) => x > 200 ? 8 : 0.05;
+    const ex = [0.15, 1, 7].map(e => shot(20, 400, 260, e, light)), hdr = await run('hdr', ex);
+    const clipped = (a, max, n) => { let c = 0; for (let i = 1; i < n * 3; i += 3) if (a[i] <= 0.02 * max || a[i] >= 0.98 * max) c++; return c / n; };
+    const pano = await run('pano', [shot(0, 300, 260, 1), shot(170, 300, 260, 1.2), shot(340, 300, 260, 0.9)], { focal: [4000, 4000, 4000], maxPixels: 4e6 });   // a long lens: the crops are sideways shifts, not a turning camera
+    let refused = '';
+    try { await run('pano', [shot(0, 300, 260, 1), { w: 300, h: 260, rgb: new Uint8Array(300 * 260 * 3).fill(90) }], { focal: [0, 0], maxPixels: 4e6 }); } catch (e) { refused = e.message; }
+    wk.terminate();
+    return { hdrClip: clipped(hdr.rgb16, 65535, 400 * 260), single: ex.map(im => clipped(im.rgb, 255, 400 * 260)), pano: [pano.w, pano.h], stats: pano.stats, refused };
+  });
+  assert(r.hdrClip < 0.12 && Math.min(...r.single) > r.hdrClip * 2, `merged ${r.hdrClip}, single exposures ${r.single}`);
+  assert(r.pano[0] > 480 && r.pano[0] < 700 && r.stats.matches.every(m => m >= 10) && r.stats.overlapDiff < 6, JSON.stringify(r.pano) + JSON.stringify(r.stats));
+  assert(/do not overlap/.test(r.refused), 'photos that do not overlap were joined anyway');
+  return `HDR: ${(r.hdrClip * 100).toFixed(1)}% clipped against ${(Math.min(...r.single) * 100).toFixed(0)}% in the best single exposure; panorama ${r.pano[0]} × ${r.pano[1]} from three 300-wide photos`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

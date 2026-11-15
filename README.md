@@ -206,6 +206,27 @@ Formats the editor can't open itself fall back to the operating system's decoder
 
 Develop → Color Grading → **Auto** (or Ctrl/⌘+Shift+G, or Library → Quick Develop → Auto Grade for a whole selection). It analyses the photo or video frame as currently toned — color casts in the shadows, midtones and highlights (measured on near-neutral areas), colorfulness, skin tones, warm/cool balance and dominant hue — and sets the grading wheels, blending/balance, vibrance and saturation. Pick a look (Auto, Balanced, Cinematic, Warm, Cool, Moody, Film, Soft pastel) and a strength (Subtle/Normal/Strong). Everything it sets stays editable and lands in History as one step.
 
+## Wide colour (Display P3)
+
+RAW files are developed into Display P3 primaries, which reach past sRGB in the reds and greens. A photo marked **Wide colour** (Develop → Calibration; on by default for RAW photos added from now on, see Preferences) is edited in that space from end to end: the viewer shows it on a P3 canvas, so a wide-gamut screen shows the extra colour, and an export as Display P3 or Adobe RGB carries it. An sRGB export, a thumbnail or an sRGB screen gets the picture narrowed to sRGB at the very end.
+
+Photos that are not marked — every RAW photo that was in a catalog before this existed — are brought to sRGB first and render as they always did. Turning the mark on or off is not an edit: presets, paste and reset leave it alone. Limits: the working space is P3, so an Adobe RGB export holds what P3 and Adobe RGB share; JPEG, PNG and other non-RAW sources are sRGB as before; `.cube` looks are applied in sRGB and brought back.
+
+## Content-aware fill
+
+Spot Removal has a third mode, **Fill**: paint over what should go (a sign, a wire, a person in the background) and the area is rebuilt from what surrounds it, continuing textures and edges instead of copying one place. It is PatchMatch run from coarse to fine in its own thread (`js/fillworker.js`); a typical fill takes one to two seconds. The filled piece is made once at the photo's full resolution (up to 1024 pixels across the area) and kept beside the thumbnails; the photo's settings only name it, so undo, snapshots and virtual copies stay small. Pasting or syncing a fill onto another photo makes it again from that photo's own surroundings. A large area that spans several different materials can come out with the wrong material in its middle — fill such an area in smaller strokes.
+
+## People
+
+Library → **People** → the magnifier looks through the photos shown for faces (YuNet), describes each (SFace) and puts the faces that have no name into rows, one per person as far as it can tell. Type a name on a row to file all its faces under that person; click a face first to leave it out; **Ignore** drops faces you do not want to keep track of. People appear in the panel with their photo count, a click shows their photos, and their names are found by the search box and by smart collections. Right-click a person to rename, look through or remove them. Everything runs on this computer; the faces' descriptions are kept in the catalog and small face pictures beside the thumbnails. Faces seen at an odd angle usually end up in a row of their own.
+
+## Merge to HDR and to Panorama
+
+Select the photos, then Photo → **Merge to HDR…** or **Merge to Panorama…**. Each photo goes in as it is developed now; the result is written as a 16-bit TIFF next to the first photo (`name-HDR.tif`, `name-Pano.tif`) and added to the catalog, where it is edited like any other photo.
+
+- **HDR** takes two or more exposures of one scene, lines them up (shifts only — a tripod or a steady burst; it does not correct rotation or things that moved) and fuses them: every part of the picture comes mostly from the exposure that shows it best, blended across scales so no seams show. Bright areas stay brighter than dark ones, so the result looks like a photograph rather than a flattened one.
+- **Panorama** joins overlapping photos in the order they were taken. Corners are matched between neighbours, the photos are laid on a cylinder (using the focal length from the metadata, or a normal lens when there is none), evened out in brightness, feathered together and trimmed to a clean rectangle. It expects the camera to turn on the spot with a third or more overlap; fisheye photos (action cameras) and scenes with close foreground shot from different positions do not join well. Output is limited to 40 megapixels.
+
 ## Catalog clean-up
 
 Help → **Clean Up Catalog…** (Windows app) shows how much space is held by leftovers — previews and mask shapes that no photo, undo step, snapshot or preset refers to any more — and by the RAW cache, and removes them when you say so. Photos, edits and the catalog are not touched.

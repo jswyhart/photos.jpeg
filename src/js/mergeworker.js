@@ -234,9 +234,9 @@ function pano(id, focal, maxPixels) {
   const sm = imgs.map(im => small(im, 900));
   // The photos are laid on a cylinder around the camera: turning the camera then only slides a photo
   // sideways, so corners look the same in neighbouring photos and a wide sweep keeps its shape.
-  // That needs the focal length; without it a moderate wide-angle is assumed (a wrong guess still joins).
+  // That needs the focal length; without it a normal lens is assumed (a wrong guess still joins).
   const known = !!(focal && focal.length === K && focal.every(f => f > 0)), cyl = true;
-  const fs = sm.map((s, i) => known ? focal[i] / s.step : 0.85 * Math.max(s.w, s.h));
+  const fs = sm.map((s, i) => known ? focal[i] / s.step : 1.2 * Math.max(s.w, s.h));
   const toCyl = (i, x, y) => { if (!cyl) return [x, y]; const f = fs[i], cx = sm[i].w / 2, cy = sm[i].h / 2, dx = x - cx; return [f * Math.atan(dx / f) + cx, f * (y - cy) / Math.sqrt(dx * dx + f * f) + cy]; };
   const fromCyl = (i, x, y) => { if (!cyl) return [x, y]; const f = fs[i], cx = sm[i].w / 2, cy = sm[i].h / 2, a = (x - cx) / f; if (Math.abs(a) > 1.4) return [-1e9, -1e9]; const dx = f * Math.tan(a); return [dx + cx, (y - cy) * Math.sqrt(dx * dx + f * f) / f + cy]; };
   say(0.03, 'Finding corners');
