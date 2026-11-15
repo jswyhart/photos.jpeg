@@ -2,8 +2,8 @@
  * photos.jpeg — Subject, Sky and People masks.
  *
  * A small neural network looks at the photo and marks what belongs to the
- * subject (U²-Net), or to the sky / to people (a scene network trained on
- * ADE20K: EfficientViT-Seg, or SegFormer in builds that still carry it). The result becomes an ordinary brush mask: it takes the same
+ * subject (U²-Net), or to the sky / to people (EfficientViT-Seg, trained on
+ * ADE20K scenes). The result becomes an ordinary brush mask: it takes the same
  * adjustments, can be inverted, limited by luminance, and touched up with
  * the brush (paint to add, Alt-paint to erase).
  *
@@ -21,9 +21,7 @@
   const G = 512;                               // long edge of a mask map, the same grid brush masks use
   const MODELS = {
     subject: { file: 'u2netp.onnx', size: 320 },
-    // EfficientViT-Seg B1 (Apache 2.0) when it is part of the build; otherwise the older SegFormer-B0 file.
-    // Both give scores for the same 150 ADE20K kinds of thing, in the same order.
-    scene: { file: 'efficientvit-seg-b1-ade20k.onnx', size: 512, fallback: { model: 'scene0', file: 'segformer-b0-ade.onnx' } }
+    scene: { file: 'efficientvit-seg-b1-ade20k.onnx', size: 512 }       // scores for the 150 ADE20K kinds of thing
   };
   const KINDS = {
     subject: { model: 'subject', name: 'Subject', busy: 'Finding the subject…' },
@@ -54,19 +52,15 @@
     return worker;
   }
   /** Run a model on a prepared input; resolves to { data, dims }. */
-  const useFallback = {};
   function infer(model, input) {
-    const M = MODELS[model], alt = M.fallback && useFallback[model] ? M.fallback : null;
-    const spare = M.fallback && !alt ? input.slice() : null;
+    const M = MODELS[model];
     return new Promise((resolve, reject) => {
       const id = ++seq;
       waiting.set(id, { resolve, reject });
-      modelWorker().postMessage({ id, model: alt ? alt.model : model, file: alt ? alt.file : M.file, size: M.size, input }, [input.buffer]);
+      modelWorker().postMessage({ id, model, file: M.file, size: M.size, input }, [input.buffer]);
     }).catch((e) => {
       const msg = String(e && e.message || e);
-      // the preferred file is not in this build: use the other one from now on
-      if (spare && /404|Failed to fetch|no such file|failed to load|protobuf|ERROR_CODE/i.test(msg)) { useFallback[model] = true; return infer(model, spare); }
-      throw new Error(/404|Failed to fetch|no such file|failed to load model/i.test(msg) ? `The model for this mask (${M.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The mask model could not be started: ' + msg);
+      throw new Error(/404|Failed to fetch|no such file|failed to load/i.test(msg) ? `The model for this mask (${M.file}) is not part of this build` : /could not be started/.test(msg) ? msg : 'The mask model could not be started: ' + msg);
     });
   }
 
@@ -128,7 +122,7 @@
       for (let i = 0; i < p.length; i++) p[i] = (d[i] - lo) / span;
       return { data: p, w, h, found: hi - lo > 0.2 };
     }
-    // SegFormer: scores for 150 kinds of thing per cell → the share that belongs to the wanted ones
+    // the scene network: scores for 150 kinds of thing per cell → the share that belongs to the wanted ones
     const C = t.dims[1], h = t.dims[2], w = t.dims[3], N = w * h, p = new Float32Array(N);
     let strong = 0;
     for (let i = 0; i < N; i++) {

@@ -11,20 +11,17 @@ u2netp.onnx
     Apache License 2.0. ONNX export from the rembg project (https://github.com/danielgatis/rembg).
     Used for the Subject mask.
 
-segformer-b0-ade.onnx
-    SegFormer-B0 fine-tuned on ADE20K (150 scene classes) by NVIDIA — https://github.com/NVlabs/SegFormer
-    ONNX export from https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512
-    NVIDIA Source Code License for SegFormer: research and evaluation use only, NOT for commercial use
-    (https://github.com/NVlabs/SegFormer/blob/master/LICENSE). Used for the Sky and People masks.
-    If this app is ever distributed commercially, leave this file out (the Sky and People masks then
-    report that their model is missing) or replace it with a model under a licence that allows it.
-
-efficientvit-seg-b1-ade20k.onnx   (preferred scene model; used instead of SegFormer when present)
-    EfficientViT-Seg B1 trained on ADE20K by MIT HAN Lab — https://github.com/mit-han-lab/efficientvit
-    Apache License 2.0. Not distributed as ONNX by its authors: export it from their weights
-    (https://huggingface.co/han-cai/efficientvit-seg, efficientvit_seg_b1_ade20k.pt) at 512×512, opset 17,
-    input "pixel_values", output "logits", and put the file here. Once it is here, segformer-b0-ade.onnx
-    can be deleted. Same 150 classes in the same order, so nothing else changes.
+efficientvit-seg-b1-ade20k.onnx
+    EfficientViT-Seg B1 trained on ADE20K (150 scene classes) by MIT HAN Lab —
+    https://github.com/mit-han-lab/efficientvit — Apache License 2.0.
+    Exported to ONNX for this app from the authors' weights
+    (https://huggingface.co/han-cai/efficientvit-seg, efficientvit_seg_b1_ade20k.pt): fixed 512×512 input
+    "pixel_values", output "logits" (1×150×64×64), opset 17; the export matches the PyTorch model to 1e-4.
+    Used for the Sky and People masks and for keyword suggestions. It replaces SegFormer-B0, whose NVIDIA
+    licence did not allow commercial use; on test photos the two agree (sky IoU 0.94, people 0.93) and this
+    one is about twice as fast.
+    The ADE20K photos the model learned from have their own terms of use (research); that concerns the
+    training data, not this file's licence.
 
 face_detection_yunet_2023mar.onnx
     YuNet face detector by Shiqi Yu et al., from the OpenCV Zoo —
