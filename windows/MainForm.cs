@@ -100,7 +100,7 @@ public sealed class MainForm : Form
         s.IsBuiltInErrorPageEnabled = false;
 
         await core.AddScriptToExecuteOnDocumentCreatedAsync(
-            $"window.__pjInfo = {{ version: {JsonSerializer.Serialize(Version)}, platform: 'windows' }};");
+            $"window.__pjInfo = {{ version: {JsonSerializer.Serialize(Version)}, platform: 'windows', packaged: {(Program.IsPackaged ? "true" : "false")} }};");
 
         new ResourceServer(core, Version).Attach();
         bridge = new Bridge(this, core);

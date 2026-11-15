@@ -1523,6 +1523,19 @@
       const added = await importDescs(descs);
       if (added.length === 1) openDevelop(added[0].id);
     });
+    // A Store install: say once where its catalog lives, because it stops following an ordinary installation's
+    if (window.__pjInfo && window.__pjInfo.packaged && !Cat.pref('store.noticeSeen', false)) {
+      Cat.setPref('store.noticeSeen', true);
+      const had = Cat.state.photos.length;
+      UI.modal({
+        title: 'photos.jpeg from the Microsoft Store', icon: 'circle-info',
+        body: h('div', { style: { width: '440px', lineHeight: 1.5 } },
+          h('p', null, had ? `Your catalog from the ordinary installation is here: ${had} photo${had === 1 ? '' : 's'}, with their edits.` : 'This copy starts with an empty catalog.'),
+          h('p', null, 'From now on this copy keeps its own catalog. Windows gives a Store app a private place for what it saves, so edits made here do not appear in an installation from the Setup program, and edits made there no longer appear here.'),
+          h('p', { class: 'muted' }, 'Your photo files are not copied or moved; both read them where they are. To stay with one catalog, use only one of the two installations.')),
+        buttons: [{ label: 'OK', primary: true }]
+      });
+    }
     API.onFlush(async () => {
       // exports still running: closing would cut them off, so ask first
       const n = PJ.Exporter && PJ.Exporter.queueLength ? PJ.Exporter.queueLength() : 0;

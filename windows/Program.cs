@@ -8,6 +8,19 @@ namespace PhotosJpeg;
 
 static class Program
 {
+    /// <summary>True when the app runs as a Microsoft Store (MSIX) package. Windows then keeps the app's own
+    /// copy of anything it writes under AppData, so its catalog parts ways with an ordinary installation's.</summary>
+    public static readonly bool IsPackaged = DetectPackage();
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int GetCurrentPackageFullName(ref int length, System.Text.StringBuilder? name);
+
+    static bool DetectPackage()
+    {
+        try { int n = 0; return GetCurrentPackageFullName(ref n, null) != 15700; }      // 15700: this process has no package identity
+        catch { return false; }
+    }
+
     /// <summary>One running app per data folder; later launches hand their files to the first.</summary>
     static readonly string InstanceId = "photos.jpeg." +
         Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(Storage.Root.ToLowerInvariant())))[..12];
