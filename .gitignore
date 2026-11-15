@@ -12,3 +12,5 @@ windows/build/
 windows/tools/*.exe
 windows/installer/bin/
 windows/installer/obj/
+tests/.work/
+tests/fixtures/raw/
