@@ -684,6 +684,7 @@
       lensInfo,
       h('div', { class: 'sub' }, 'Distortion'),
       bslider('lens.distortion', 'Distortion', -100, 100),
+      bslider('lens.fisheye', 'Fisheye', 0, 100, { signed: false }),
       h('div', { class: 'sub' }, 'Vignetting'),
       bslider('lens.vignette', 'Amount', -100, 100),
       bslider('lens.vigMid', 'Midpoint', 0, 100, { def: 50, signed: false }));

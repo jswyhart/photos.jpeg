@@ -25,7 +25,7 @@
   uniform vec2 uTarget;     // size of the framebuffer being drawn
   uniform vec2 uSrcSize;    // source texture size
   // geometry
-  uniform vec2 uX0Y0; uniform float uCa, uSa, uSc, uAsp, uHalf, uKv, uKh, uHalfDiag2, uKd, uPolyR; uniform vec4 uPoly;
+  uniform vec2 uX0Y0; uniform float uCa, uSa, uSc, uAsp, uHalf, uKv, uKh, uHalfDiag2, uKd, uPolyR, uFish; uniform vec4 uPoly;
   uniform vec2 uOffP; uniform vec2 uWoHo; uniform int uOrient; uniform bool uFlipH, uFlipV, uNonlin;
   // masks
   uniform int uMaskCount;
@@ -46,6 +46,7 @@
     if (uNonlin) {
       if (uKv != 0.0 || uKh != 0.0) { vec2 n = p / uHalf; p = vec2(p.x * (1.0 + uKv*n.y), p.y * (1.0 + uKh*n.x)); }
       if (uKd != 0.0) { float f = 1.0 + uKd * dot(p,p) / uHalfDiag2; p *= f; }
+      if (uFish != 0.0) { float u = length(p) / uFish; if (u > 1e-6) p *= atan(u) / u; }
       if (uPolyR != 0.0) { float r = length(p) / uPolyR; p *= 1.0 + r * (uPoly.x + r * (uPoly.y + r * (uPoly.z + r * uPoly.w))); }
     }
     vec2 q = p + uWoHo * 0.5;
@@ -594,6 +595,7 @@
       gl.uniform1f(L.uCa, q.ca); gl.uniform1f(L.uSa, q.sa); gl.uniform1f(L.uSc, q.sc); gl.uniform1f(L.uAsp, q.asp);
       gl.uniform1f(L.uHalf, q.half); gl.uniform1f(L.uKv, q.kv); gl.uniform1f(L.uKh, q.kh);
       gl.uniform1f(L.uHalfDiag2, q.halfDiag2); gl.uniform1f(L.uKd, q.kd);
+      gl.uniform1f(L.uFish, q.fishF || 0);
       gl.uniform1f(L.uPolyR, q.polyR || 0); gl.uniform4f(L.uPoly, q.p1 || 0, q.p2 || 0, q.p3 || 0, q.p4 || 0);
       gl.uniform2f(L.uOffP, q.offX, q.offY); gl.uniform2f(L.uWoHo, g.Wo, g.Ho);
       gl.uniform1i(L.uOrient, q.orient); gl.uniform1i(L.uFlipH, q.flipH ? 1 : 0); gl.uniform1i(L.uFlipV, q.flipV ? 1 : 0);

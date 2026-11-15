@@ -42,7 +42,7 @@
       // tr…tbb: the profile's lateral chromatic aberration — red and blue are read from the sensor at radius × (tv + tc·r + tb·r²),
       // r in units of tr × the half-diagonal; tr 0 = none.
       lens: {
-        distortion: 0, vignette: 0, vigMid: 50, profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0,
+        distortion: 0, fisheye: 0, vignette: 0, vigMid: 50, profile: '', pr: 0, p1: 0, p2: 0, p3: 0, p4: 0, vq: 0, v1: 0, v2: 0, v3: 0,
         tr: 0, tvr: 1, tvb: 1, tcr: 0, tcb: 0, tbr: 0, tbb: 0
       },
       transform: { vertical: 0, horizontal: 0, rotate: 0, aspect: 0, scale: 100, offX: 0, offY: 0 },
@@ -613,7 +613,12 @@
     const kd = (lens.distortion || 0) / 100 * 0.3;
     const p1 = +lens.p1 || 0, p2 = +lens.p2 || 0, p3 = +lens.p3 || 0, p4 = +lens.p4 || 0;
     const polyR = (p1 || p2 || p3 || p4) && lens.pr > 0 ? lens.pr * Math.sqrt(halfDiag2) : 0;
-    const nonlinear = kv !== 0 || kh !== 0 || kd !== 0 || polyR !== 0;
+    // Fisheye → straight lines. A fisheye (action cameras) puts a point at an angle θ from the axis at a
+    // distance f·θ from the centre; an ordinary lens puts it at f·tan θ. The slider says how wide the lens
+    // is: at 100 the picture's corners are taken to be 80° off the axis. The centre keeps its size and the
+    // edges are stretched outward, so the frame shows a little less than before.
+    const fishF = lens.fisheye > 0 ? Math.sqrt(halfDiag2) / (Math.min(100, lens.fisheye) / 100 * 1.4) : 0;
+    const nonlinear = kv !== 0 || kh !== 0 || kd !== 0 || polyR !== 0 || fishF !== 0;
     const x0 = crop.x * Wo - Wo / 2, y0 = crop.y * Ho - Ho / 2;
     const orient = g.orient, flipH = g.flipH, flipV = g.flipV;
 
@@ -632,6 +637,10 @@
         if (kd) {
           const f = 1 + kd * (px * px + py * py) / halfDiag2;
           px *= f; py *= f;
+        }
+        if (fishF) {
+          const u = Math.sqrt(px * px + py * py) / fishF;
+          if (u > 1e-6) { const f = Math.atan(u) / u; px *= f; py *= f; }
         }
         if (polyR) {
           // the lens itself comes last: this is where the corrected point was drawn on the sensor
@@ -682,7 +691,7 @@
       return [ox, oy];
     }
 
-    const params = { x0, y0, ca, sa, sc, offX, offY, asp, half, kv, kh, halfDiag2, kd, polyR, p1, p2, p3, p4, orient, flipH: !!flipH, flipV: !!flipV };
+    const params = { x0, y0, ca, sa, sc, offX, offY, asp, half, kv, kh, halfDiag2, kd, fishF, polyR, p1, p2, p3, p4, orient, flipH: !!flipH, flipV: !!flipV };
     return { W, H, Wo, Ho, outW, outH, nonlinear, toSource, toOutput, crop, params };
   }
 
