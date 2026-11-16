@@ -78,7 +78,7 @@ PKG=1 ./build.sh            # build/photos.jpeg.pkg  — double-click installer 
 DMG=1 PKG=1 UNIVERSAL=1 ./build.sh   # both, for Apple Silicon + Intel
 ```
 
-Builds are ad-hoc signed, so on other Macs Gatekeeper says the app "can't be checked". Right-click → Open once, or run `xattr -dr com.apple.quarantine "/Applications/photos.jpeg.app"`. To distribute without that warning, you need an Apple Developer account. Sign and notarize the build:
+Builds are ad-hoc signed, so on other Macs Gatekeeper says the app "can't be checked". Open it once, then allow it under System Settings → Privacy & Security → Open Anyway (macOS 14 and earlier: right-click → Open once), or run `xattr -dr com.apple.quarantine "/Applications/photos.jpeg.app"`. To distribute without that warning, you need an Apple Developer account. Sign and notarize the build:
 `SIGN_ID="Developer ID Application: Your Name (TEAMID)" INSTALLER_ID="Developer ID Installer: Your Name (TEAMID)" DMG=1 PKG=1 ./build.sh`,
 then `xcrun notarytool submit build/photos.jpeg.dmg --apple-id you@example.com --team-id TEAMID --wait` and `xcrun stapler staple build/photos.jpeg.dmg`. Do the same for the .pkg.
 
@@ -267,7 +267,7 @@ The neural-network models behind the masks and face grouping are part of the nor
 
 The Android app takes the same switch (`gradle assembleDebug -Plite`) and the Mac build `LITE=1 ./build.sh`.
 
-Pushing a version tag (`v2.1.0`) runs `.github/workflows/release.yml`: it builds the Windows installers, the Store package and the Android app and publishes them as a GitHub release, with that version's section of `CHANGELOG.md` as the notes, and the two small `update.json` files the installed Windows app asks for. When the repository has signing secrets (their names are at the top of the workflow file), the Windows programs and the Android app are signed; without them they are built unsigned, as now.
+Pushing a version tag (`v2.1.0`) runs `.github/workflows/release.yml`: it builds the Windows installers, the Store package, the macOS disk image (Apple Silicon + Intel) and the Android app and publishes them as a GitHub release, with that version's section of `CHANGELOG.md` as the notes, and the two small `update.json` files the installed Windows app asks for. When the repository has signing secrets (their names are at the top of the workflow file), the Windows programs and the Android app are signed; without them they are built unsigned, as now. The macOS disk image is always ad-hoc signed.
 
 Every push to `main` that touches the apps runs `.github/workflows/ci.yml`: it compiles the Mac app on a Mac and starts it, and starts the Android app in an emulator and looks inside its web view for errors. The Mac app cannot be built on the Windows PC the app is developed on, so this is where it is compiled; each run leaves its build log and a screenshot on the branches `ci-logs-mac` and `ci-logs-android`.
 

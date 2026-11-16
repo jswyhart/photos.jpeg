@@ -1,6 +1,6 @@
-# Builds the Windows installers and the Android app when a version tag (v2.1.0, …) is pushed, and
-# publishes them as a GitHub release. Can also be run by hand from the Actions tab (it then only
-# builds and keeps the files as workflow artifacts; nothing is published).
+# Builds the Windows installers, the macOS disk image and the Android app when a version tag
+# (v2.1.0, …) is pushed, and publishes them as a GitHub release. Can also be run by hand from the
+# Actions tab (it then only builds and keeps the files as workflow artifacts; nothing is published).
 #
 # Signing happens when the repository has the secrets for it (Settings → Secrets and variables →
 # Actions); without them everything is built unsigned, as before:
@@ -102,9 +102,24 @@ jobs:
           path: photos.jpeg-*-android*.apk
           if-no-files-found: error
 
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disk image (Apple Silicon + Intel, ad-hoc signed)
+        run: |
+          (cd mac && UNIVERSAL=1 DMG=1 bash ./build.sh)
+          v="${GITHUB_REF_NAME#v}"
+          cp mac/build/photos.jpeg.dmg "photos.jpeg-${v//\//-}-mac-universal.dmg"   # a branch name (run by hand) may hold a slash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: photos.jpeg-*-mac-universal.dmg
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, android]
+    needs: [windows, android, mac]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +132,7 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           awk -v v="## $v" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "photos.jpeg $v" > notes.md
-          printf '\n\nUnless they were built with a signing certificate, the Setup programs are not code-signed, and Windows SmartScreen asks before running them. The `-lite` Setup leaves the neural-network models out and downloads each the first time a feature needs it. The `.msix` is the Microsoft Store package (unsigned; it cannot be installed by double-click). The Android file is a debug build unless its name has no "-debug".\n' >> notes.md
+          printf '\n\nUnless they were built with a signing certificate, the Setup programs are not code-signed, and Windows SmartScreen asks before running them. The `-lite` Setup leaves the neural-network models out and downloads each the first time a feature needs it. The `.msix` is the Microsoft Store package (unsigned; it cannot be installed by double-click). The Android file is a debug build unless its name has no "-debug". The `.dmg` is the macOS app for Apple Silicon and Intel; it is not signed with a Developer ID, so macOS asks before opening it the first time: allow it under System Settings → Privacy & Security → Open Anyway (macOS 14 and earlier: right-click the app → Open).\n' >> notes.md
       - name: Update manifests (what the installed app asks for; see windows/Updater.cs)
         run: |
           v="${GITHUB_REF_NAME#v}"
