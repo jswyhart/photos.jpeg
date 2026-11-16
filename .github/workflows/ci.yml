@@ -25,7 +25,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           sw_vers > "$RUNNER_TEMP/out/system.txt"; swiftc --version >> "$RUNNER_TEMP/out/system.txt" 2>&1
           set -o pipefail
-          (cd mac && UNIVERSAL=1 DMG=1 ./build.sh) 2>&1 | tee "$RUNNER_TEMP/out/build.log"
+          (cd mac && UNIVERSAL=1 DMG=1 bash ./build.sh) 2>&1 | tee "$RUNNER_TEMP/out/build.log"
       - name: Start it
         run: |
           out="$RUNNER_TEMP/out"
@@ -60,6 +60,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Build
         working-directory: android
         run: gradle --no-daemon assembleDebug
@@ -70,9 +73,10 @@ jobs:
       - name: Start it in an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: 35
           arch: x86_64
           target: google_apis
+          profile: pixel_6
           disable-animations: true
           script: bash android/ci-smoke.sh "${{ runner.temp }}/out"
       - name: Leave the output on a branch
