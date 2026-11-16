@@ -1,5 +1,21 @@
 # Changes
 
+## Unreleased
+
+**New**
+- Merge to Focus Stack: photos focused at different distances become one that is sharp throughout
+- Soft proof: version 4 and XYZ-based printer profiles are read, and "paper and ink" shows the paper's white and the ink's black
+- The installed Windows app finds new versions on GitHub by itself (Help → Check for Updates); nothing is installed without asking
+- macOS: catalog backups, rename or move, watched folder. Android: catalog backups
+
+**Better**
+- Galaxy JPEG XL DNGs open in about 9 seconds instead of 26 on a PC with 16 GB of memory (still opt-in)
+- Android: the editor no longer sits under the status bar
+
+**Platforms**
+- The Mac app is now compiled and started on every change (GitHub Actions), and the Android app is started in an emulator; both came up cleanly
+- The release workflow signs the Windows and Android builds when the repository holds the certificates
+
 ## 2.1.1
 
 - The installers and Store package built by the release workflow include ffmpeg (6.1.1, GPL essentials build), as locally built ones already did; the 2.1.0 release files do not

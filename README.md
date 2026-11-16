@@ -212,7 +212,7 @@ RAW files are developed into Display P3 primaries, which reach past sRGB in the 
 
 Photos saved in Display P3 — JPEG and HEIC files from most phones — are read in P3 as well instead of being narrowed on the way in, and take the same mark.
 
-**Soft proof** (below the mark) changes only what you see. *sRGB* shows a wide-colour photo as an sRGB file or screen will, with the colours sRGB cannot hold in magenta; *Adobe RGB* leaves the picture as it is and marks what an Adobe RGB export cannot hold. **A printer profile** can be loaded there too (*Load a printer profile…*, an `.icc` or `.icm` file from the printer or paper maker): the colours that printer and paper cannot hold are marked, on any photo. Profiles of the usual kind are read (ICC version 2, Lab-based tables); version 4 table profiles are refused with a message. The proof marks what is out of reach; it does not imitate the paper's white or the print's contrast.
+**Soft proof** (below the mark) changes only what you see. *sRGB* shows a wide-colour photo as an sRGB file or screen will, with the colours sRGB cannot hold in magenta; *Adobe RGB* leaves the picture as it is and marks what an Adobe RGB export cannot hold. **A printer profile** can be loaded there too (*Load a printer profile…*, an `.icc` or `.icm` file from the printer or paper maker): the colours that printer and paper cannot hold are marked, on any photo. Table-based profiles are read, version 2 and version 4, built on Lab or XYZ; a profile that only holds a matrix and tone curves (a screen's) is refused with a message. With a printer profile chosen, a second list sets what the proof shows: only the marks, or **paper and ink** as well — white becomes the paper's own white, black the densest ink, and colours out of reach are pulled in the way the printer would. That is a guide to how the print will differ from the screen, not a measured match: it depends on the screen being calibrated and on the light the print is viewed in. Version 4 profiles were checked against a profile built for the tests, not yet against one from a paper maker.
 
 Photos that are not marked — every photo that was in a catalog before this existed — are brought to sRGB first and render as they always did. Turning the mark on or off is not an edit: presets, paste and reset leave it alone. Limits: the working space is P3, so an Adobe RGB export holds what P3 and Adobe RGB share; JPEG, PNG and other non-RAW sources are sRGB as before; `.cube` looks are applied in sRGB and brought back.
 
@@ -230,11 +230,12 @@ Two more masks build on this (Develop → Masking): **Background** is everything
 
 ## Merge to HDR and to Panorama
 
-Select the photos, then Photo → **Merge to HDR…** or **Merge to Panorama…**. Each photo goes in as it is developed now; the result is written as a 16-bit TIFF next to the first photo (`name-HDR.tif`, `name-Pano.tif`) and added to the catalog, where it is edited like any other photo.
+Select the photos, then Photo → **Merge to HDR…**, **Merge to Panorama…** or **Merge to Focus Stack…**. Each photo goes in as it is developed now; the result is written as a 16-bit TIFF next to the first photo (`name-HDR.tif`, `name-Pano.tif`, `name-Stack.tif`) and added to the catalog, where it is edited like any other photo.
 
 - **HDR** takes two or more exposures of one scene, lines them up — hand-held frames are matched on their corners, so small turns are corrected as well as shifts — leaves out anything that moved between the frames (people, leaves, cars) so it does not show as a ghost, and fuses them: every part of the picture comes mostly from the exposure that shows it best, blended across scales so no seams show. Bright areas stay brighter than dark ones, so the result looks like a photograph rather than a flattened one.
 - **Merge to HDR (editable DNG)** keeps the scene's whole range instead of a finished picture: the frames are merged into linear light and written as a DNG (`name-HDR.dng`) that opens like any RAW file, looking like the middle exposure, with the highlights and shadows of the other frames there for Exposure, Highlights and Shadows to bring out.
 - **Panorama** joins overlapping photos in the order they were taken. Corners are matched between neighbours, the photos are laid on a cylinder (using the focal length from the metadata, or a normal lens when there is none), evened out in brightness, blended in two bands (broad light and colour over a wide stretch, fine detail from the strongest photo, so small misalignments show once and sharp rather than doubled) and trimmed to a clean rectangle. It expects the camera to turn on the spot with a third or more overlap; fisheye photos (action cameras) and scenes with close foreground shot from different positions do not join well. Output is limited to 40 megapixels.
+- **Focus stack** takes photos of one scene focused at different distances (close-ups, products, landscapes with a near foreground) and makes one that is sharp throughout. The photos are lined up first — focusing nearer or farther changes how large things are drawn — and then every detail, from fine texture to broad shapes, is taken from the photo that shows it sharpest. Use a tripod or a steady hand, the same exposure for every photo, and enough steps that neighbouring photos overlap in what is sharp; things that move between the photos leave traces.
 
 ## Fisheye
 
@@ -242,15 +243,15 @@ Develop → Lens → **Fisheye** turns the curved lines of a fisheye lens (actio
 
 ## Renaming and moving files
 
-Photo → **Rename or Move…** (also in the right-click menu) renames the selected files on disk by a pattern — `{name}`, `{date}`, `{time}`, `{seq}`, `{model}` — and can move them to another folder. Their `.xmp` sidecars go with them and the catalog follows, so edits, ratings and virtual copies stay attached. Nothing is ever overwritten: a file whose new name is taken is left as it is and listed. (Windows app.)
+Photo → **Rename or Move…** (also in the right-click menu) renames the selected files on disk by a pattern — `{name}`, `{date}`, `{time}`, `{seq}`, `{model}` — and can move them to another folder. Their `.xmp` sidecars go with them and the catalog follows, so edits, ratings and virtual copies stay attached. Nothing is ever overwritten: a file whose new name is taken is left as it is and listed. (Windows and Mac apps.)
 
 ## Watched folder
 
-Preferences → **Watched folder**: photos and clips that appear in that folder, or in folders inside it, are added to the catalog by themselves once they have finished being written — for a card reader that copies into a folder, a phone sync, or a tethering program. They join the catalog quietly, without taking you away from what you are doing. (Windows app.)
+Preferences → **Watched folder**: photos and clips that appear in that folder, or in folders inside it, are added to the catalog by themselves once they have finished being written — for a card reader that copies into a folder, a phone sync, or a tethering program. They join the catalog quietly, without taking you away from what you are doing. (Windows and Mac apps; the Mac app looks through the folder every few seconds.)
 
 ## Catalog backups
 
-The catalog is copied once a day (the newest 14 are kept). Help → **Catalog Backups…** lists the copies, makes one on the spot, and restores one: the catalog as it is at that moment is kept as a further backup first, so a restore can be undone. Photo files are not part of a backup and are never changed by a restore. (Windows app.)
+The catalog is copied once a day (the newest 14 are kept). Help → **Catalog Backups…** lists the copies, makes one on the spot, and restores one: the catalog as it is at that moment is kept as a further backup first, so a restore can be undone. Photo files are not part of a backup and are never changed by a restore. (All three apps; on Android the list is under Preferences.)
 
 ## Printing
 
@@ -266,11 +267,13 @@ The neural-network models behind the masks and face grouping are part of the nor
 
 The Android app takes the same switch (`gradle assembleDebug -Plite`) and the Mac build `LITE=1 ./build.sh`.
 
-Pushing a version tag (`v2.1.0`) runs `.github/workflows/release.yml`: it builds the Windows installers, the Store package and the Android app and publishes them as a GitHub release, with that version's section of `CHANGELOG.md` as the notes.
+Pushing a version tag (`v2.1.0`) runs `.github/workflows/release.yml`: it builds the Windows installers, the Store package and the Android app and publishes them as a GitHub release, with that version's section of `CHANGELOG.md` as the notes, and the two small `update.json` files the installed Windows app asks for. When the repository has signing secrets (their names are at the top of the workflow file), the Windows programs and the Android app are signed; without them they are built unsigned, as now.
+
+Every push to `main` that touches the apps runs `.github/workflows/ci.yml`: it compiles the Mac app on a Mac and starts it, and starts the Android app in an emulator and looks inside its web view for errors. The Mac app cannot be built on the Windows PC the app is developed on, so this is where it is compiled; each run leaves its build log and a screenshot on the branches `ci-logs-mac` and `ci-logs-android`.
 
 `windows\package-store.ps1` packs the app as an MSIX for the Microsoft Store with the identity reserved in Partner Center (`windows/store/AppxManifest.xml`). The package is left unsigned — the Store signs what is uploaded — so it cannot be installed by double-click; test with the ordinary build. A Store install keeps its own copy of the data folder once it writes to it (Windows redirects a packaged app's writes under AppData).
 
-DNG files whose picture is stored as JPEG XL (Galaxy S23 and later) can be developed from that data: Preferences → *Develop JPEG XL DNG files (experimental)*. It takes about half a minute per photo (a 50-megapixel picture is decoded in full), and the result looks like the preview stored inside the DNG, which is flatter than the JPEG the phone saves next to it (that one gets the phone's own extra processing); so it is off unless you turn it on, and such files otherwise open from their embedded preview.
+DNG files whose picture is stored as JPEG XL (Galaxy S23 and later) can be developed from that data: Preferences → *Develop JPEG XL DNG files (experimental)*. A 50-megapixel picture is decoded in full, in several threads at once — as many as the PC's memory allows, since each needs about 1.7 GB while it works: about 9 seconds with four threads on a PC with 16 GB or more, 15 with two on 8 GB, 26 with one. The result looks like the preview stored inside the DNG, which is flatter than the JPEG the phone saves next to it (that one gets the phone's own extra processing); so it is off unless you turn it on, and such files otherwise open from their embedded preview.
 
 ## Catalog clean-up
 

@@ -136,12 +136,12 @@ class Bridge(private val activity: MainActivity, private val storage: Storage) {
             is Boolean, is Number -> value.toString()
             else -> JSONObject.quote(value.toString())
         }
-        val js = "window.__pjResolve($id, ${JSONObject.quote(json)}, null);"
+        val js = "window.__pjResolve && window.__pjResolve($id, ${JSONObject.quote(json)}, null);"      // (the page may have been reloaded since it asked)
         activity.runOnUiThread { activity.web.evaluateJavascript(js, null) }
     }
 
     private fun reject(id: Int, message: String) {
-        val js = "window.__pjResolve($id, null, ${JSONObject.quote(message)});"
+        val js = "window.__pjResolve && window.__pjResolve($id, null, ${JSONObject.quote(message)});"
         activity.runOnUiThread { activity.web.evaluateJavascript(js, null) }
     }
 

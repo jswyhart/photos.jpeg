@@ -69,6 +69,7 @@ public static class Updater
         using var req = new HttpRequestMessage(HttpMethod.Get, ManifestUrl);
         req.Headers.UserAgent.ParseAdd("photos.jpeg-updater");
         using var res = await http.SendAsync(req);
+        if (res.StatusCode == System.Net.HttpStatusCode.NotFound) return null;   // the newest release carries no update information: nothing newer is on offer
         res.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var root = doc.RootElement;

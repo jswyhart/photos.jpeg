@@ -577,6 +577,66 @@ test('printer soft proof: working colours reach Lab correctly; a file that is no
   assert(/not a colour profile/.test(r.refused) && r.px === '255,0,255 | 120,130,110' && r.out === 1, JSON.stringify(r));
 });
 
+test('printer soft proof: a version 4 profile is read, and paper and ink are shown', async () => {
+  const r = await page(() => {
+    // a made-up version 4 printer profile: holds the middle 80 % of each Lab axis, on paper that is not quite white
+    const be32 = (v) => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255], s15 = (v) => be32((Math.round(v * 65536)) >>> 0), str = (s) => [...s].map(c => c.charCodeAt(0));
+    const para1 = [...str('para'), 0, 0, 0, 0, 0, 0, 0, 0, ...s15(1)], curv0 = [...str('curv'), 0, 0, 0, 0, ...be32(0)];
+    const curvG = [...str('curv'), 0, 0, 0, 0, ...be32(1), 1, 0, 0, 0], curvT = [...str('curv'), 0, 0, 0, 0, ...be32(3), 0, 0, 0x80, 0, 0xff, 0xff, 0, 0];
+    const mat = (k, o) => [...s15(k), ...s15(0), ...s15(0), ...s15(0), ...s15(k), ...s15(0), ...s15(0), ...s15(0), ...s15(k), ...s15(o), ...s15(o), ...s15(o)];
+    const clut = () => { const g = new Array(16).fill(0); g[0] = g[1] = g[2] = 2; const d = []; for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) for (let c = 0; c < 2; c++) for (const v of [a, b, c]) d.push(v ? 255 : 0, v ? 255 : 0); return [...g, 2, 0, 0, 0, ...d]; };
+    const tag = (type, pieces) => {
+      const head = [...str(type), 0, 0, 0, 0, 3, 3, 0, 0], body = [], offs = {}; let at = 32;
+      for (const k of ['B', 'mat', 'M', 'clut', 'A']) { if (pieces[k]) { offs[k] = at; body.push(...pieces[k]); at += pieces[k].length; } else offs[k] = 0; }
+      return [...head, ...be32(offs.B), ...be32(offs.mat), ...be32(offs.M), ...be32(offs.clut), ...be32(offs.A), ...body];
+    };
+    const three = (c) => [...c, ...c, ...c];
+    const tags = [['B2A1', tag('mBA ', { B: three(para1), mat: mat(1.25, -0.125), M: three(curv0) })], ['A2B1', tag('mAB ', { A: three(curvT), clut: clut(), M: three(curvG), mat: mat(0.8, 0.1), B: three(curv0) })],
+      ['wtpt', [...str('XYZ '), 0, 0, 0, 0, ...s15(0.85), ...s15(0.88), ...s15(0.70)]]];
+    let at = 132 + tags.length * 12; const dir = [], data = [];
+    for (const [name, b] of tags) { dir.push(...str(name), ...be32(at), ...be32(b.length)); data.push(...b); at += b.length; }
+    const head = new Array(128).fill(0); head[8] = 4; head.splice(12, 4, ...str('prtr')); head.splice(16, 4, ...str('RGB ')); head.splice(20, 4, ...str('Lab ')); head.splice(36, 4, ...str('acsp'));
+    const Pr = PJ.Proof, T = Pr._test, p = Pr.parse(new Uint8Array([...head, ...be32(tags.length), ...dir, ...data])), t = Pr.tables(p);
+    const pr = (L, a, b) => T.printed(p, p.b2a, L, a, b).map(v => +v.toFixed(1));
+    // a render with paper and ink shown, not marked: white comes out as the paper, a mid grey stays neutral
+    const src = new Uint8ClampedArray(8); src.set([255, 255, 255, 255], 0); src.set([128, 128, 128, 255], 4);
+    const res = PJ.Pipeline.render({ src: { data: src, width: 2, height: 1 }, settings: PJ.Pipeline.defaultSettings(), fullLongEdge: 2, seed: 1, opts: { gamutCube: { n: t.n, srgb: t.srgb, p3: t.p3, paper: t.paper, noMark: true } } });
+    const marked = PJ.Pipeline.render({ src: { data: src, width: 2, height: 1 }, settings: PJ.Pipeline.defaultSettings(), fullLongEdge: 2, seed: 1, opts: { gamutCube: { n: t.n, srgb: t.srgb, p3: t.p3 } } });
+    return { mid: pr(50, 10, -10), white: pr(100, 0, 0), outMid: T.outside(p, 50, 10, -10), outWhite: T.outside(p, 100, 0, 0), paper: Array.from(res.data.slice(0, 3)), grey: Array.from(res.data.slice(4, 7)), marked: Array.from(marked.data.slice(0, 3)).join(), threads: PJ.Raw.jxlThreads() };
+  });
+  assert(r.mid.join() === '50,10,-10' && r.white.join() === '90,0,0', 'the profile\'s tables: ' + JSON.stringify(r));
+  assert(r.outMid < 0.5 && r.outWhite >= 0.5 && r.marked === '255,0,255', 'what is out of reach: ' + JSON.stringify(r));
+  assert(r.paper[0] < 235 && r.paper[0] > 190 && r.paper[2] < r.paper[0] && Math.abs(r.grey[0] - r.grey[1]) < 8 && r.grey[0] < 140, 'paper and ink: ' + JSON.stringify(r));
+  assert(r.threads >= 1 && r.threads <= 4, 'JPEG XL threads: ' + r.threads);
+});
+
+test('focus stack: sharp parts of two photos are merged into one', async () => {
+  const r = await page(async () => {
+    const w = 360, h = 240, N = w * h;
+    let seed = 5; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const scene = new Float32Array(N * 3);
+    for (let i = 0; i < N * 3; i++) scene[i] = 110;
+    for (let k = 0; k < 160; k++) { const bx = (rnd() * w) | 0, by = (rnd() * h) | 0, bw = 6 + rnd() * 30, bh = 6 + rnd() * 30, c = [rnd() * 255, rnd() * 255, rnd() * 255]; for (let y = by; y < Math.min(h, by + bh); y++) for (let x = bx; x < Math.min(w, bx + bw); x++) for (let q = 0; q < 3; q++) scene[(y * w + x) * 3 + q] = c[q]; }
+    const soft = Float32Array.from(scene);
+    for (let pass = 0; pass < 3; pass++) { const t = Float32Array.from(soft); for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++) for (let q = 0; q < 3; q++) { let s = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) s += t[((y + dy) * w + x + dx) * 3 + q]; soft[(y * w + x) * 3 + q] = s / 25; } }
+    const frame = (left) => { const o = new Uint8Array(N * 3); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const src = (x < w / 2) === left ? scene : soft; for (let q = 0; q < 3; q++) o[(y * w + x) * 3 + q] = src[(y * w + x) * 3 + q] + 0.5; } return o; };
+    const a = frame(true), b = frame(false);
+    const rms = (get) => { let s = 0, n = 0; for (let y = 8; y < h - 8; y++) for (let x = 8; x < w - 8; x++) for (let q = 0; q < 3; q++) { const e = get((y * w + x) * 3 + q) - scene[(y * w + x) * 3 + q]; s += e * e; n++; } return Math.sqrt(s / n); };
+    const before = [rms(i => a[i]), rms(i => b[i])];
+    const wk = new Worker(new URL('js/mergeworker.js', location.href).href);
+    const out = await new Promise((resolve, reject) => {
+      wk.onmessage = (ev) => { const m = ev.data; if (m.progress != null) return; if (m.error) reject(new Error(m.error)); else resolve(m); };
+      wk.onerror = (ev) => reject(new Error(ev.message || 'worker'));
+      wk.postMessage({ op: 'reset' }); wk.postMessage({ op: 'image', w, h, rgb: a }, [a.buffer]); wk.postMessage({ op: 'image', w, h, rgb: b }, [b.buffer]); wk.postMessage({ op: 'stack', id: 1 });
+    });
+    wk.terminate();
+    return { before: before.map(v => +v.toFixed(1)), after: +rms(i => out.rgb16[i] / 257).toFixed(1), size: out.w + 'x' + out.h, share: out.stats.share, command: typeof PJ.App.commands === 'object' ? 'mergeStack' in PJ.App.commands : null };
+  });
+  assert(r.size === '360x240' && r.after < Math.min(...r.before) * 0.45, 'the stack must be much closer to the sharp scene than either photo: ' + JSON.stringify(r));
+  assert(r.share.length === 2 && r.share[0] > 0.3 && r.share[1] > 0.3, 'both photos must contribute: ' + JSON.stringify(r));
+  return `error ${r.before.join(' / ')} → ${r.after}`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

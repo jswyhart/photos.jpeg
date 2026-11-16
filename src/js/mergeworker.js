@@ -276,7 +276,21 @@ function stack(id) {
     const A = small(imgs[i], 800), B = small(imgs[onto], 800), ca = corners(A, 1500), cb = corners(B, 1500), m = matchCorners(ca, cb);
     const r = m.length >= 30 ? ransac(m.map(([a]) => [ca[a].x, ca[a].y]), m.map(([, b]) => [cb[b].x, cb[b].y]), rand) : null;
     if (!(r && r.inliers.length >= 25)) { align[i] = 'left as it is'; return; }
-    const Hi = inv(r.H), st = A.step, src = imgs[i].rgb, out = new Uint8Array(N * 3);
+    const Hi = inv(r.H), st = A.step, src = imgs[i].rgb;
+    // Corners matched between a sharp and a blurred rendering of the same thing can agree on a wrong
+    // answer. The redrawing is only used when it makes the two photos (compared blurred, so that focus
+    // does not count) more alike than they already are.
+    {
+      const a = blur5(blur5(A.d, A.w, A.h), A.w, A.h), b = blur5(blur5(B.d, B.w, B.h), B.w, B.h);
+      let plain = 0, moved = 0, n = 0;
+      for (let y = 4; y < B.h - 4; y += 3) for (let x = 4; x < B.w - 4; x += 3) {
+        const p = apply(Hi, x, y), px = Math.round(p[0]), py = Math.round(p[1]);
+        if (px < 0 || py < 0 || px >= A.w || py >= A.h) { moved += 40; plain += Math.abs(b[y * B.w + x] - a[y * A.w + x]); n++; continue; }
+        plain += Math.abs(b[y * B.w + x] - a[y * A.w + x]); moved += Math.abs(b[y * B.w + x] - a[py * A.w + px]); n++;
+      }
+      if (!(moved < plain * 0.97)) { align[i] = 'already in place'; return; }
+    }
+    const out = new Uint8Array(N * 3);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const p = apply(Hi, (x + 0.5) / st - 0.5, (y + 0.5) / st - 0.5);
       const fx = Math.min(w - 1.001, Math.max(0, (p[0] + 0.5) * st - 0.5)), fy = Math.min(h - 1.001, Math.max(0, (p[1] + 0.5) * st - 0.5));
