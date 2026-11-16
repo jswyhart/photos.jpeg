@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 2.2.0
 
 **New**
 - Merge to Focus Stack: photos focused at different distances become one that is sharp throughout
