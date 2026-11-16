@@ -1,0 +1,150 @@
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=43] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=43 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=44] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=44 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=42] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.658 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=42 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.662 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=46] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.662 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=46 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.662 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=45] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.662 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=45 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=49] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=49 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.664 Df photosjpeg[2041:289e] [com.apple.sharekit:Framework] Copy: canPerformWithItems returns YES
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=48] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=48 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=50] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=50 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=47] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.664 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=47 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.667 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.667 A  photosjpeg[2041:283c] (CoreServicesInternal) CFURLResolveBookmarkData
+2026-11-16 17:45:45.668 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.668 A  photosjpeg[2041:283c] (CoreServicesInternal) CFURLResolveBookmarkData
+2026-11-16 17:45:45.668 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.669 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=51] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:45.669 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=51 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:45.691 Df photosjpeg[2041:2828] [com.apple.WebKit:ResourceLoadStatistics] StorageAccessPromptQuirkController::didUpdateCachedListData: Loaded 1 storage access prompt(s) quirks from WebPrivacy.
+2026-11-16 17:45:45.745 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=57] ResourceLoader::willSendRequestInternal: calling completion handler
+2026-11-16 17:45:45.745 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=57 SubResourceLoader::willSendRequestInternal: resource load finished; calling completion handler
+2026-11-16 17:45:45.745 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] 0x10a0800e0 - [resourceLoader=0x10eda3600, frameLoader=0x10a1e4100, frame=0x10a050220, webPageID=9, frameID=4294967297, resourceID=57] WebLoaderStrategy::tryLoadingUsingURLSchemeHandler: URL will be handled by a UIProcess URL scheme handler
+2026-11-16 17:45:45.745 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=57] WebURLSchemeTaskProxy::startLoading
+2026-11-16 17:45:45.751 Df photosjpeg[2041:28d0] [com.apple.WebKit:RemoteLayerBuffers] WebContent[2049]: [renderingBackend=58] Created rendering backend for pageProxyID=8, webPageID=9
+2026-11-16 17:45:45.759 Df photosjpeg[2041:28d0] [com.apple.WebKit:Process] WebContent[2049] GPUProcessConnection::create - 0x10a7c6840
+2026-11-16 17:45:45.760 Df photosjpeg[2041:2828] [com.apple.xpc:connection] [0xa6caf43c0] activating connection: mach=false listener=false peer=false name=com.apple.WebKit.GPU
+2026-11-16 17:45:45.760 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x121110120 - [PID=0, throttler=0x12127c280] ProcessThrottler::Activity::Activity: Starting foreground activity / 'Process initialization'
+2026-11-16 17:45:45.760 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x121110180 - [PID=0, throttler=0x12127c280] ProcessThrottler::Activity::Activity: Starting foreground activity / 'GPU for foreground view(s)'
+2026-11-16 17:45:45.761 Df photosjpeg[2041:2828] [com.apple.coremedia:] <<<< Alt >>>> fpSupport_GetVideoRangeForCoreDisplayWithPreference: displayID 1 reported potentialHeadRoom=1 wideColorSupported=NO marz=NO almd=NO deviceAllowsHDR=YES isBuiltinPanel=NO externalPanel=YES prefersHDR10=NO
+2026-11-16 17:45:45.761 Df photosjpeg[2041:2828] [com.apple.WebKit:Sandbox] Successfully created a sandbox extension for '<private>'
+2026-11-16 17:45:45.761 Df photosjpeg[2041:2828] [com.apple.WebKit:Sandbox] Successfully created a sandbox extension for '<private>'
+2026-11-16 17:45:45.761 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x12127c1f0 - GPUProcessProxy is taking a background assertion because a web process is requesting a connection
+2026-11-16 17:45:45.762 Df photosjpeg[2041:289e] [com.apple.sharekit:Framework] Copy: canPerformWithItems returns YES
+2026-11-16 17:45:45.762 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.762 A  photosjpeg[2041:283c] (CoreServicesInternal) CFURLResolveBookmarkData
+2026-11-16 17:45:45.762 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.762 A  photosjpeg[2041:283c] (CoreServicesInternal) CFURLResolveBookmarkData
+2026-11-16 17:45:45.763 Df photosjpeg[2041:283c] [com.apple.iconservices:default] Store Unit: <private> not found.
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:Process] 0x12127c1f0 - GPUProcessProxy::didFinishLaunching:
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x121110210 - [PID=2053, throttler=0x12127c280] ProcessThrottler::Activity::Activity: Starting foreground activity / 'Lifetime Activity'
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:Process] 0x12127c1f0 - GPUProcessProxy::connectionWillOpen:
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x12127c280 - [PID=2053] ProcessThrottler::didConnectToProcess
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x12127c280 - [PID=2053] ProcessThrottler::setThrottleState: Updating process assertion type to 3 (foregroundActivities=3, backgroundActivities=2)
+2026-11-16 17:45:45.800 Df photosjpeg[2041:2828] [com.apple.WebKit:Process] 0x12110c190 - NetworkProcessProxy::sendXPCEndpointToProcess(0x12127c1f0) state = 1 has connection = 1 XPC endpoint message = 0xa6c8d8000
+2026-11-16 17:45:45.800 Df photosjpeg[2041:285b] [com.apple.WebKit:ProcessSuspension] 0x1210f0220 - ProcessAssertion::acquireSync Trying to take RBS assertion 'Jetsam Boost' for process with PID=2053
+2026-11-16 17:45:45.804 Df photosjpeg[2041:285b] [com.apple.WebKit:ProcessSuspension] 0x1210f0220 - ProcessAssertion::acquireSync Successfully took RBS assertion 'Jetsam Boost' for process with PID=2053
+2026-11-16 17:45:45.804 Df photosjpeg[2041:285b] [com.apple.WebKit:ProcessSuspension] 0x121144180 - ProcessAssertion::acquireSync Trying to take RBS assertion 'GPUProcess Foreground Assertion' for process with PID=2053
+2026-11-16 17:45:45.805 Df photosjpeg[2041:2850] [com.apple.xpc:connection] [0xa6caf4640] activating connection: mach=true listener=false peer=false name=com.apple.powerlog.plxpclogger.xpc
+2026-11-16 17:45:45.805 Df photosjpeg[2041:285b] [com.apple.WebKit:ProcessSuspension] 0x121144180 - ProcessAssertion::acquireSync Successfully took RBS assertion 'GPUProcess Foreground Assertion' for process with PID=2053
+2026-11-16 17:45:45.805 Df photosjpeg[2041:2850] [com.apple.xpc:connection] [0xa6caf4640] failed to do a bootstrap look-up: xpc_error=[3: No such process]
+2026-11-16 17:45:45.805 Df photosjpeg[2041:2850] [com.apple.xpc:connection] [0xa6caf4640] invalidated after a failed init
+2026-11-16 17:45:45.867 Df photosjpeg[2041:283c] [com.apple.sharekit:Framework] Copy: canPerformWithItems returns YES
+2026-11-16 17:45:45.867 A  photosjpeg[2041:283c] (CoreFoundation) Loading Preferences From User CFPrefsD
+2026-11-16 17:45:45.869 Df photosjpeg[2041:283c] [com.apple.sharekit:Framework] Sorted services: <private>
+2026-11-16 17:45:45.869 Df photosjpeg[2041:283c] [com.apple.sharekit:Framework] It took 823 ms to get sharing services async for mask <private>
+2026-11-16 17:45:45.869 Df photosjpeg[2041:289e] [com.apple.sharekit:Framework] Sorted services: <private>
+2026-11-16 17:45:45.869 Df photosjpeg[2041:289e] [com.apple.sharekit:Framework] It took 837 ms to get sharing services async for mask <private>
+2026-11-16 17:45:45.870 Df photosjpeg[2041:2850] [com.apple.sharekit:Framework] Sorted services: <private>
+2026-11-16 17:45:45.870 Df photosjpeg[2041:2850] [com.apple.sharekit:Framework] It took 837 ms to get sharing services async for mask <private>
+2026-11-16 17:45:45.912 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x121110120 - [PID=2053, throttler=0x12127c280] ProcessThrottler::Activity::invalidate: Ending foreground activity / 'Process initialization'
+2026-11-16 17:45:46.136 Df photosjpeg[2041:2828] [com.apple.WebKit:Loading] 0x1054a6e18 - [pageProxyID=8, webPageID=9, PID=2049] WebPageProxy::didFinishDocumentLoadForFrame: frameID=4294967297, isMainFrame=1
+2026-11-16 17:45:46.139 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=52] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.139 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=52 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.139 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.139 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=54] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=54 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=53] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=53 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=55] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=55 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=56] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=56 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049] [schemeHandler=1, webPageID=9, frameID=4294967297, taskID=57] WebURLSchemeTaskProxy::didComplete
+2026-11-16 17:45:46.140 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=57 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.156 Df photosjpeg[2041:28d0] [com.apple.WebKit:ProcessSuspension] WebContent[2049]: [webPageID=9] WebPage::unfreezeLayerTree: Removing a reason to freeze layer tree (reason=1, new=0, old=1)
+2026-11-16 17:45:46.156 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [pageID=9, frameID=4294967297, isMainFrame=1] LocalFrameView::fireLayoutRelatedMilestonesIfNeeded: Firing first visually non-empty layout milestone on the main frame
+2026-11-16 17:45:46.156 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::dispatchDidReachLayoutMilestone: dispatching DidReachLayoutMilestone (milestones=DidFirstVisuallyNonEmptyLayout)
+2026-11-16 17:45:46.156 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::dispatchDidReachLayoutMilestone: dispatching DidFirstVisuallyNonEmptyLayoutForFrame
+2026-11-16 17:45:46.156 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::completePageTransitionIfNeeded: dispatching didCompletePageTransition
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::dispatchDidReachLayoutMilestone: dispatching DidFirstLayoutForFrame
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::dispatchDidReachLayoutMilestone: dispatching DidReachLayoutMilestone (milestones=DidFirstLayout)
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9 frameID=4294967297 isMainFrame=1] FrameLoader::setState: main frame load completed
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]: Memory usage info dump at <private>:
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 1
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 1
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 2
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 25
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 26
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 64
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]:   <private>: 496011
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: ProgressTracker::progressCompleted: frameID 4294967297, value 0.500000, tracked frames 1, originating frameID 4294967297, isMainLoad 1
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: ProgressTracker::finalProgressComplete: value 0.500000, tracked frames 0, originating frameID 4294967297, isMainLoad 1, isMainLoadProgressing 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9 frameID=4294967297 isMainFrame=1] FrameLoader::checkLoadCompleteForThisFrame: Finished frame load
+2026-11-16 17:45:46.174 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.174 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.175 Df photosjpeg[2041:2828] [com.apple.WebKit:Loading] 0x1054a6e18 - [pageProxyID=8, webPageID=9, PID=2049] WebPageProxy::didFinishLoadForFrame: frameID=4294967297, isMainFrame=1
+2026-11-16 17:45:46.175 Df photosjpeg[2041:28d0] [com.apple.WebKit:Process] WebContent[2049] 0x10a7c6840 - GPUProcessConnection::didInitialize
+2026-11-16 17:45:46.175 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x1211280e0 - NavigationState will release its process network assertion soon because the page load completed
+2026-11-16 17:45:46.175 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.175 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.175 E  photosjpeg[2041:2828] [com.apple.WebKit:ResourceLoadStatistics] Failed to request restricted opener domains from WebPrivacy
+2026-11-16 17:45:46.199 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.199 Df photosjpeg[2041:2828] [com.apple.WebKit:ActivityState] PageClientImpl 0x1210bc0e0 isViewVisible(): viewWindow 0xa6cf39180, window visible 1, view hidden 0, window occluded 0
+2026-11-16 17:45:46.237 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=66] ResourceLoader::willSendRequestInternal: calling completion handler
+2026-11-16 17:45:46.237 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=66 SubResourceLoader::willSendRequestInternal: resource load finished; calling completion handler
+2026-11-16 17:45:46.237 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebLoaderStrategy::scheduleLoad: URL will be scheduled with the NetworkProcess
+2026-11-16 17:45:46.237 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebLoaderStrategy::scheduleLoad: Resource is being scheduled with the NetworkProcess (priority=2, existingNetworkResourceLoadIdentifierToResume=0)
+2026-11-16 17:45:46.237 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebResourceLoader::WebResourceLoader
+2026-11-16 17:45:46.243 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebResourceLoader::didReceiveResponse: (httpStatusCode=200)
+2026-11-16 17:45:46.244 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebResourceLoader::didReceiveData: Started receiving data
+2026-11-16 17:45:46.244 Df photosjpeg[2041:28d0] [com.apple.WebKit:Network] WebContent[2049]: [webPageID=9, frameID=4294967297, resourceID=66] WebResourceLoader::didFinishResourceLoad: (length=228594)
+2026-11-16 17:45:46.244 Df photosjpeg[2041:28d0] [com.apple.WebKit:ResourceLoading] WebContent[2049]: [pageID=9, frameID=4294967297, resourceID=66 SubResourceLoader::didFinishLoading
+2026-11-16 17:45:46.640 Df photosjpeg[2041:28d0] [com.apple.WebKit:Layout] WebContent[2049]: [webFrameID=4294967297, webPageID=9] WebLocalFrameLoaderClient::dispatchDidReachLayoutMilestone: dispatching DidReachLayoutMilestone (milestones=DidFirstMeaningfulPaint)
+2026-11-16 17:45:46.683 Df photosjpeg[2041:28d0] [com.apple.coreanimation:Metal] WebContent[2049] Precompiled pipelines disabled on unsupported hardware.
+2026-11-16 17:45:46.687 E  photosjpeg[2041:28d0] (WebKit) WebContent[2049] fopen failed for data file: errno = 2 (No such file or directory)
+2026-11-16 17:45:46.687 Df photosjpeg[2041:28d0] (WebKit) WebContent[2049] Invalidating cache
+2026-11-16 17:45:46.688 Df photosjpeg[2041:28d0] [com.apple.xpc:connection] WebContent[2049] [0xa22e80500] activating connection: mach=false listener=false peer=false name=com.apple.MTLCompilerService
+2026-11-16 17:45:46.688 Df photosjpeg[2041:28d0] [com.apple.xpc:connection] WebContent[2049] [0xa22e80b40] activating connection: mach=false listener=false peer=false name=com.apple.MTLCompilerService
+2026-11-16 17:45:46.758 E  photosjpeg[2041:28d0] (WebKit) WebContent[2049] fopen failed for data file: errno = 2 (No such file or directory)
+2026-11-16 17:45:46.758 Df photosjpeg[2041:28d0] (WebKit) WebContent[2049] Invalidating cache
+2026-11-16 17:45:46.951 Df photosjpeg[2041:28d0] [com.apple.xpc:connection] WebContent[2049] [0xa22e80dc0] activating connection: mach=true listener=false peer=false name=com.apple.analyticsd
+2026-11-16 17:45:46.952 Df photosjpeg[2041:28d0] [com.apple.xpc:connection] WebContent[2049] [0xa22e80dc0] failed to do a bootstrap look-up: xpc_error=[159: Unknown error: 159]
+2026-11-16 17:45:46.952 Df photosjpeg[2041:28d0] [com.apple.xpc:connection] WebContent[2049] [0xa22e80dc0] invalidated after a failed init
+2026-11-16 17:45:46.954 Df photosjpeg[2041:28d0] [com.apple.CoreAnalytics:client] WebContent[2049] XPC connection invalidated (daemon unloaded/disabled)
+2026-11-16 17:45:46.954 Df photosjpeg[2041:28d0] [com.apple.CoreAnalytics:client] WebContent[2049] XPC message reply connection invalidated (client likely exiting): Connection invalid
+2026-11-16 17:45:47.042 Df photosjpeg[2041:2828] [com.apple.inputmethodkitClient:Client] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-16 17:45:47.045 Df photosjpeg[2041:2828] [com.apple.WebKit:ViewState] 0x12116c190 [pageProxyID=8, webPageID=9, PID=2049, DisplayID=1] RemoteLayerTreeDrawingAreaProxyMac::scheduleDisplayRefreshCallbacks
+2026-11-16 17:45:47.144 Df photosjpeg[2041:2828] [com.apple.WebKit:Loading] 0x1054a6e18 - [pageProxyID=8, webPageID=9, PID=2049] WebPageProxy::didGeneratePageLoadTiming: url=<private> firstVisualLayout=0.852 firstMeaningfulPaint=1.739 domContentLoaded=0.832 loadEvent=0.870 subresourcesFinished=0.870
+2026-11-16 17:45:48.795 Df photosjpeg[2041:2828] [com.apple.AppKit:AutomaticTermination] void _updateToReflectAutomaticTerminationState(void) Setting _kLSApplicationWouldBeTerminatedByTALKey=0
+2026-11-16 17:45:49.176 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x1211280e0 NavigationState is releasing background process assertion because a page load completed
+2026-11-16 17:45:49.176 Df photosjpeg[2041:2828] [com.apple.WebKit:Process] Dropping network activity on WebProcess with PID 2049
+2026-11-16 17:45:49.176 Df photosjpeg[2041:2828] [com.apple.WebKit:ProcessSuspension] 0x1211100f0 - [PID=2049, throttler=0x1210d4710] ProcessThrottler::Activity::invalidate: Ending background activity / 'Page Load'
+2026-11-16 17:45:54.227 Df photosjpeg[2041:289e] [com.apple.launchservices:db] NotifyToken::RegisterDispatch(user.uid.501.com.apple.LaunchServices.database) fired for session key <private>
+2026-11-16 17:45:54.886 Df photosjpeg[2041:2850] [com.apple.launchservices:default] LSExceptions shared instance invalidated for timeout.
+2026-11-16 17:45:56.175 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]: PerformanceMonitor::measurePostLoadMemoryUsage: Process was using 56707584 bytes of memory after the page load.
+2026-11-16 17:46:01.175 Df photosjpeg[2041:28d0] [com.apple.WebKit:PerformanceLogging] WebContent[2049]: PerformanceMonitor::measurePostLoadCPUUsage: Process was using 0.3% CPU after the page load.
