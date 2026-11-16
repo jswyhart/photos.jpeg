@@ -43,7 +43,7 @@
       // crop
       crop: null,         // {rect, aspect, lock, start:{geo}}
       // spots
-      proof: false, showFaces: false, faceBox: null,
+      proof: false, proofPaper: false, showFaces: false, faceBox: null,
       spotSel: -1, spotSize: 0.02, spotMode: 'heal', spotFeather: 50, spotOpacity: 100, spotsVisible: true,
       // masks
       maskIdx: -1, maskCreate: null, maskOverlay: false, brush: { size: 80, feather: 50, flow: 70, erase: false },
@@ -114,7 +114,7 @@
       // soft proof: the picture as an sRGB file or screen will show it, with what sRGB cannot hold marked
       const o = { clipping: st.clipping, cropOverride: null, outSpace: E.P3_CANVAS && st.proof !== 'srgb' ? 'p3' : 'srgb' };
       if (st.proof === 'srgb' || st.proof === 'adobe') o.gamutWarn = st.proof;
-      else if (st.proof && PJ.Proof) { const t = PJ.Proof.getSync(st.proof); if (t) o.gamutCube = t; }      // a printer profile's id
+      else if (st.proof && PJ.Proof) { const t = PJ.Proof.getSync(st.proof); if (t) o.gamutCube = st.proofPaper && t.paper ? { n: t.n, srgb: t.srgb, p3: t.p3, paper: t.paper, noMark: st.proofPaper === 'only' } : { n: t.n, srgb: t.srgb, p3: t.p3 }; }      // a printer profile's id
       if (st.tool === 'crop') {
         const s = srcInfo();
         // crop override must be expressed for the level being rendered; normalized so identical

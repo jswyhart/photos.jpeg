@@ -166,19 +166,42 @@
       return best;
     } catch (_) { return null; }
   }
-  /** Decode a JPEG XL image at its full bit depth (js/jxlrawworker.js). The thread is closed afterwards: it holds over a gigabyte for a 50-megapixel picture. */
-  function decodeJxl(data, width, height, photo) {
+  /**
+   * Decode a JPEG XL image at its full bit depth (js/jxlrawworker.js). The decoder uses one processor, so the
+   * picture is cut into strips of rows that are read side by side, each in a thread of its own; the threads are
+   * closed afterwards. Each holds about 1.7 GB while it works on a 50-megapixel picture, so how many run depends
+   * on the PC's memory: four on 16 GB (about 9 s instead of 26), two on 8 GB, one where that is not known to be
+   * safe. `threads` is for measuring.
+   */
+  function jxlThreads() {
+    const info = global.__pjInfo || {}, cores = Math.max(1, (navigator.hardwareConcurrency || 4) >> 1);
+    const gb = info.memoryGb || (navigator.deviceMemory >= 8 ? 8 : 0);       // the browser itself never says more than 8
+    return Math.max(1, Math.min(4, cores, Math.floor(gb * 0.45 / 1.8)));
+  }
+  function decodeJxl(data, width, height, photo, threads) {
     return new Promise((resolve, reject) => {
-      const wk = new Worker(new URL('js/jxlrawworker.js', location.href).href, { type: 'module' });
-      const done = (fn, v) => { try { wk.terminate(); } catch (_) { } PJ.UI && PJ.UI.activity && PJ.UI.activity('', 0); fn(v); };
-      wk.onmessage = (ev) => {
-        const m = ev.data;
-        if (m.progress != null) { if (PJ.UI && PJ.UI.activity) PJ.UI.activity(`Reading ${photo.name} (JPEG XL RAW)…`, m.progress); return; }
-        if (m.error) done(reject, new Error('JPEG XL RAW: ' + m.error)); else done(resolve, { data: m.rgb16, width: m.width, height: m.height });
-      };
-      wk.onerror = (ev) => done(reject, new Error('The JPEG XL decoder could not be started' + (ev && ev.message ? ': ' + ev.message : '')));
-      const copy = data.slice();
-      wk.postMessage({ id: 1, data: copy, width, height }, [copy.buffer]);
+      const n = Math.max(1, Math.min(threads || jxlThreads(), Math.ceil(height / 512)));
+      const per = Math.ceil(height / n), wks = [], prog = new Array(n).fill(0);
+      let out = null, left = n, over = false;
+      const done = (fn, v) => { if (over) return; over = true; for (const w of wks) { try { w.terminate(); } catch (_) { } } PJ.UI && PJ.UI.activity && PJ.UI.activity('', 0); fn(v); };
+      for (let i = 0; i < n; i++) {
+        const wk = new Worker(new URL('js/jxlrawworker.js', location.href).href, { type: 'module' });
+        wks.push(wk);
+        wk.onmessage = (ev) => {
+          const m = ev.data;
+          if (over) return;
+          if (m.progress != null) { prog[i] = m.progress; if (PJ.UI && PJ.UI.activity) PJ.UI.activity(`Reading ${photo.name} (JPEG XL RAW)…`, prog.reduce((a, b) => a + b, 0) / n); return; }
+          if (m.error) return done(reject, new Error('JPEG XL RAW: ' + m.error));
+          if (n === 1) return done(resolve, { data: m.rgb16, width: m.width, height: m.height });
+          if (!out) out = new Uint16Array(m.width * m.height * 3);
+          out.set(m.rgb16, m.top * m.width * 3);
+          try { wk.terminate(); } catch (_) { }
+          if (--left === 0) done(resolve, { data: out, width: m.width, height: m.height });
+        };
+        wk.onerror = (ev) => done(reject, new Error('The JPEG XL decoder could not be started' + (ev && ev.message ? ': ' + ev.message : '')));
+        const copy = data.slice();
+        wk.postMessage({ id: 1, data: copy, width, height, top: i * per, rows: Math.min(per, height - i * per) }, [copy.buffer]);
+      }
     });
   }
 
@@ -356,5 +379,5 @@
     return [Math.max(0, r), Math.max(0, g), Math.max(0, b)];
   }
 
-  global.PJ.Raw = { canDecode, develop, sourceLinear, jxlInDng, DECODABLE };
+  global.PJ.Raw = { canDecode, develop, sourceLinear, jxlInDng, decodeJxl, jxlThreads, DECODABLE };
 })(window);

@@ -10,6 +10,9 @@ final class Bridge: NSObject, WKScriptMessageHandlerWithReply {
 
     init(app: AppDelegate) { self.app = app }
 
+    /// The watched folder, when one is set (Preferences → Watched folder).
+    private var watch: FolderWatch?
+
     /// Open streaming writes (video export): handle -> (file, final path). Only touched on the io queue.
     private var writers: [Int: (FileHandle, String)] = [:]
     private var writeSeq = 0
@@ -117,6 +120,30 @@ final class Bridge: NSObject, WKScriptMessageHandlerWithReply {
         case "cleanStore":
             let keep = a["keep"] as? [String] ?? [], remove = a["remove"] as? Bool ?? false
             background(reply) { store.cleanStore(keep: keep, remove: remove) }
+
+        case "listBackups":
+            background(reply) { store.listBackups() }
+
+        case "backupNow":
+            background(reply) { try store.backupNow() }
+
+        case "restoreBackup":
+            let name = a["name"] as? String ?? ""
+            background(reply) { try store.restoreBackup(name) }
+
+        case "moveFile":
+            let source = a["path"] as? String ?? "", dest = a["dest"] as? String ?? "", name = a["name"] as? String ?? ""
+            background(reply) { try store.moveFile(source: source, destDir: dest, newName: name) }
+
+        case "watchFolder":
+            let folder = a["path"] as? String ?? ""
+            watch?.stop()
+            watch = nil
+            if folder.isEmpty { reply(["watching": ""], nil); return }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDir), isDir.boolValue else { reply(nil, "That folder is not there"); return }
+            watch = FolderWatch(folder: folder) { [weak self] paths in self?.app?.sendEvent("watchFiles", ["paths": paths]) }
+            reply(["watching": folder], nil)
 
         case "deleteThumb":
             let id = a["id"] as? String ?? ""

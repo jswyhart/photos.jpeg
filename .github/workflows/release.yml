@@ -2,9 +2,17 @@
 # publishes them as a GitHub release. Can also be run by hand from the Actions tab (it then only
 # builds and keeps the files as workflow artifacts; nothing is published).
 #
-# Nothing here is signed: the Setup programs are unsigned (Windows SmartScreen will say so), the
-# Android app is a debug build, and the Store package is the one to upload in Partner Center, which
-# signs it. The macOS app needs a Mac and is not built here.
+# Signing happens when the repository has the secrets for it (Settings → Secrets and variables →
+# Actions); without them everything is built unsigned, as before:
+#   WINDOWS_CERT_PFX        a code-signing certificate with its key, as base64 of the .pfx file
+#   WINDOWS_CERT_PASSWORD   that file's password
+#       → the app, its uninstaller and both Setup programs are signed (no SmartScreen warning once
+#         the certificate has a reputation, or at once with an EV certificate)
+#   ANDROID_KEYSTORE        a keystore holding your release key, as base64 of the .jks file
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#       → a release build signed with that key instead of a debug build
+# The Store package is never signed here: Partner Center signs it. The macOS app is built unsigned
+# (ad-hoc); see mac/build.sh for SIGN_ID.
 name: Release
 
 on:
@@ -18,6 +26,8 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      CERT: ${{ secrets.WINDOWS_CERT_PFX }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -26,15 +36,26 @@ jobs:
       - name: ffmpeg to bundle (one fixed version, checked against its checksum)
         shell: pwsh
         run: ./windows/get-ffmpeg.ps1
+      - name: Signing certificate (only when the repository has one)
+        if: env.CERT != ''
+        shell: pwsh
+        env:
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT))
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:CERT_PASSWORD -AsPlainText -Force)
+          Remove-Item $pfx -Force
+          "PJ_SIGN=$($cert.Thumbprint)" >> $env:GITHUB_ENV
       - name: Installer
         shell: pwsh
-        run: ./windows/build.ps1 -Installer
+        run: if ($env:PJ_SIGN) { ./windows/build.ps1 -Installer -Sign $env:PJ_SIGN } else { ./windows/build.ps1 -Installer }
       - name: Store package
         shell: pwsh
         run: ./windows/package-store.ps1 -NoBuild
       - name: Lite installer (models are downloaded on first use)
         shell: pwsh
-        run: ./windows/build.ps1 -Installer -Lite
+        run: if ($env:PJ_SIGN) { ./windows/build.ps1 -Installer -Lite -Sign $env:PJ_SIGN } else { ./windows/build.ps1 -Installer -Lite }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -45,6 +66,8 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    env:
+      KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -54,15 +77,29 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
-      - name: Build
+      - name: Build (debug; when the repository has no release key)
+        if: env.KEYSTORE == ''
         working-directory: android
-        run: gradle --no-daemon assembleDebug
-      - name: Name the file
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "photos.jpeg-${GITHUB_REF_NAME#v}-android-debug.apk"
+        run: |
+          gradle --no-daemon assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "../photos.jpeg-${GITHUB_REF_NAME#v}-android-debug.apk"
+      - name: Build (release, signed with the repository's key)
+        if: env.KEYSTORE != ''
+        working-directory: android
+        env:
+          PJ_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PJ_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          PJ_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export PJ_KEYSTORE="$RUNNER_TEMP/release.jks"
+          echo "$KEYSTORE" | base64 -d > "$PJ_KEYSTORE"
+          gradle --no-daemon assembleRelease
+          rm -f "$PJ_KEYSTORE"
+          cp app/build/outputs/apk/release/app-release.apk "../photos.jpeg-${GITHUB_REF_NAME#v}-android.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: photos.jpeg-*-android-debug.apk
+          path: photos.jpeg-*-android*.apk
           if-no-files-found: error
 
   publish:
@@ -80,7 +117,20 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           awk -v v="## $v" '$0==v{on=1;next} /^## /{on=0} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "photos.jpeg $v" > notes.md
-          printf '\n\nThe Setup programs are not code-signed, so Windows SmartScreen asks before running them. The `-lite` Setup leaves the neural-network models out and downloads each the first time a feature needs it. The `.msix` is the Microsoft Store package (unsigned; it cannot be installed by double-click). The Android file is a debug build.\n' >> notes.md
+          printf '\n\nUnless they were built with a signing certificate, the Setup programs are not code-signed, and Windows SmartScreen asks before running them. The `-lite` Setup leaves the neural-network models out and downloads each the first time a feature needs it. The `.msix` is the Microsoft Store package (unsigned; it cannot be installed by double-click). The Android file is a debug build unless its name has no "-debug".\n' >> notes.md
+      - name: Update manifests (what the installed app asks for; see windows/Updater.cs)
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          note="$(grep -m1 '^- ' notes.md | sed 's/^- //' | cut -c1-300)"
+          manifest() {   # <Setup file> <manifest file>
+            [ -f "dist/$1" ] || { echo "missing dist/$1"; exit 1; }
+            sha="$(sha256sum "dist/$1" | cut -d' ' -f1)"
+            jq -n --arg version "$v" --arg url "$base/$1" --arg sha256 "$sha" --arg notes "$note" '{version:$version,url:$url,sha256:$sha256,notes:$notes}' > "dist/$2"
+            cat "dist/$2"
+          }
+          manifest "photos.jpeg-Setup-$v-x64.exe" update.json
+          manifest "photos.jpeg-Setup-$v-x64-lite.exe" update-lite.json
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

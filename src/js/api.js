@@ -85,10 +85,10 @@
       saveThumb: (id, bytes) => call('saveThumb', { id, data: b64(bytes) }),
       deleteThumb: (id) => call('deleteThumb', { id }),
       cleanStore: (keep, remove, raw) => call('cleanStore', { keep, remove: !!remove, raw: !!raw }),
-      // the Windows shell only, so far: catalog backups, renaming / moving originals, a watched folder
-      listBackups: WIN ? () => call('listBackups') : null, backupNow: WIN ? () => call('backupNow') : null, restoreBackup: WIN ? (name) => call('restoreBackup', { name }) : null,
-      moveFile: WIN ? (path, dest, name) => call('moveFile', { path, dest: dest || '', name }) : null,
-      watchFolder: WIN ? (path) => call('watchFolder', { path: path || '' }) : null, onWatchFiles: (cb) => on('watchFiles', cb),
+      // catalog backups everywhere; renaming / moving originals and a watched folder where files have real paths (Windows, macOS)
+      listBackups: () => call('listBackups'), backupNow: () => call('backupNow'), restoreBackup: (name) => call('restoreBackup', { name }),
+      moveFile: WIN || MAC ? (path, dest, name) => call('moveFile', { path, dest: dest || '', name }) : null,
+      watchFolder: WIN || MAC ? (path) => call('watchFolder', { path: path || '' }) : null, onWatchFiles: (cb) => on('watchFiles', cb),
       modelStatus: () => call('modelStatus'), modelFetch: (name) => call('modelFetch', { name }), onModelProgress: (cb) => on('modelProgress', cb),
       thumbUrl: (id, v) => `/__pj/thumb/${q(id)}.jpg?v=${v || 0}`,
       hasThumbStore: true,

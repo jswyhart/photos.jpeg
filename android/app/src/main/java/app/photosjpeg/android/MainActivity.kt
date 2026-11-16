@@ -56,10 +56,14 @@ class MainActivity : AppCompatActivity() {
 
         // Edge-to-edge is enforced on Android 15; keep the editor clear of system bars and the keyboard.
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // (a web view ignores its own padding, so it sits in a frame that takes the insets)
         web = WebView(this)
         web.setBackgroundColor(0xFF111214.toInt())
-        setContentView(web)
-        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+        val frame = android.widget.FrameLayout(this)
+        frame.setBackgroundColor(0xFF111214.toInt())
+        frame.addView(web, android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(frame)
+        ViewCompat.setOnApplyWindowInsetsListener(frame) { v, insets ->
             val b = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
             )

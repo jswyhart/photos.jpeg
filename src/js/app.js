@@ -787,10 +787,10 @@
 
   async function mergePhotos(kind, list, opts) {
     const dng = kind === 'hdrDng'; if (dng) kind = 'hdr';
-    const what = kind === 'hdr' ? 'HDR' : 'Panorama';
+    const what = kind === 'hdr' ? 'HDR' : kind === 'stack' ? 'Focus stack' : 'Panorama';
     const photos = (list || selectedPhotos()).filter(p => p.kind !== 'video' && !p.missing)
       .sort((a, b) => String(a.captureTime || '').localeCompare(String(b.captureTime || '')) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-    if (photos.length < 2) { UI.toast(kind === 'hdr' ? 'Select two or more exposures of the same scene first' : 'Select two or more overlapping photos first', 'circle-info'); return null; }
+    if (photos.length < 2) { UI.toast(kind === 'hdr' ? 'Select two or more exposures of the same scene first' : kind === 'stack' ? 'Select two or more photos of the same scene, focused at different distances, first' : 'Select two or more overlapping photos first', 'circle-info'); return null; }
     if (photos.length > 12) { UI.toast('That is more than 12 photos — merge them in smaller groups', 'circle-info'); return null; }
     if (mergeBusy) { UI.toast('A merge is already running', 'circle-info'); return null; }
     mergeBusy = true;
@@ -833,7 +833,7 @@
       } else bytes = PJ.Exporter.encodeTiffRich({ width: out.w, height: out.h, data16: out.rgb16 }, PJ.ICC ? PJ.ICC.profile('srgb') : null);
       const first = photos[0], base = first.name.replace(/\.[^.]+$/, '');
       const dir = (opts && opts.dir) || API.dirname(first.path);
-      const written = await API.writeFile(API.joinPath(dir, `${base}-${kind === 'hdr' ? 'HDR' : 'Pano'}.${dng ? 'dng' : 'tif'}`), bytes, 'unique');
+      const written = await API.writeFile(API.joinPath(dir, `${base}-${kind === 'hdr' ? 'HDR' : kind === 'stack' ? 'Stack' : 'Pano'}.${dng ? 'dng' : 'tif'}`), bytes, 'unique');
       const path = (written && written.path) || written;
       UI.activity('');
       let added = [];
@@ -851,7 +851,7 @@
 
   /* ---------------- catalog backups ---------------- */
   async function catalogBackups() {
-    if (!API.listBackups) return UI.toast('Catalog backups are part of the Windows app', 'circle-info');
+    if (!API.listBackups) return UI.toast('Catalog backups are not available in the browser version', 'circle-info');
     const body = h('div', { style: { width: '520px' } });
     const kind = (n) => /before-restore/.test(n) ? 'kept before a restore' : /manual/.test(n) ? 'made by hand' : 'daily';
     const fill = async () => {
@@ -883,7 +883,7 @@
     return s.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
   }
   async function batchRename() {
-    if (!API.moveFile) return UI.toast('Renaming and moving files is part of the Windows app', 'circle-info');
+    if (!API.moveFile) return UI.toast('Renaming and moving files is part of the Windows and Mac apps', 'circle-info');
     // virtual copies share a file with their original: each file is handled once
     const files = [...new Map(targets().filter(p => !p.missing && !(p.video && p.video.cdng)).map(p => [p.path, p])).values()]
       .sort((a, b) => String(a.captureTime || '').localeCompare(String(b.captureTime || '')) || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -1161,6 +1161,7 @@
       { label: 'Merge to HDR…', icon: 'layer-group', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('hdr') },
       { label: 'Merge to HDR (editable DNG)…', icon: 'layer-group', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('hdrDng') },
       { label: 'Merge to Panorama…', icon: 'panorama', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('pano') },
+      { label: 'Merge to Focus Stack…', icon: 'layer-group', hidden: n < 2 || !API.writeFile, action: () => mergePhotos('stack') },
       '-',
       { label: 'Auto Tone', icon: 'wand-magic-sparkles', key: 'Ctrl+Shift+U', action: () => autoToneSelection() },
       { label: 'Auto Color Grade', icon: 'palette', key: 'Ctrl+Shift+G', action: () => autoGradeSelection() },
@@ -1469,7 +1470,7 @@
     lensProfile: lensProfileSelection,
     compare: compareView, stack: stackSelection, unstack: unstackSelection, autoStack, cleanCatalog,
     catalogBackups, batchRename,
-    mergeHdr: () => mergePhotos('hdr'), mergeHdrDng: () => mergePhotos('hdrDng'), mergePano: () => mergePhotos('pano'),
+    mergeHdr: () => mergePhotos('hdr'), mergeHdrDng: () => mergePhotos('hdrDng'), mergePano: () => mergePhotos('pano'), mergeStack: () => mergePhotos('stack'),
     toggleFaces: async () => {
       if (!PJ.Faces) return;
       const on = viewer.st.showFaces = !viewer.st.showFaces, p = activePhoto();

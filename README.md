@@ -25,7 +25,7 @@ For scripted installs: `photos.jpeg-Setup-2.0.0-x64.exe /S` (silent), with optio
 
 **Code signing.** Unsigned builds make Windows SmartScreen show a "Windows protected your PC" prompt on other PCs (More info → Run anyway), and Controlled folder access treats the app as unknown. With a code-signing certificate in your Windows certificate store, `.\build.ps1 -Installer -Sign <certificate thumbprint>` signs the app, the uninstaller and the Setup program (SHA-256, timestamped; `-TimestampUrl` picks the timestamp server). The certificate itself has to be bought from a certificate authority — the build can't create a trusted one.
 
-**Updates.** Set `<UpdateUrl>` in `windows/PhotosJpeg.csproj` to the address of a small JSON file you host — `{ "version": "2.1.0", "url": "https://…/photos.jpeg-Setup-2.1.0-x64.exe", "sha256": "<hex SHA-256 of that file>", "notes": "…" }`. The app then checks it once a day at start-up and on Help → Check for Updates; when the version there is higher, it offers to download the Setup program, verifies its SHA-256 against the manifest, and runs it to update in place and reopen. Only https addresses are accepted. With `<UpdateUrl>` empty (the default) the app never contacts anything.
+**Updates.** The installed app asks GitHub once a day at start-up, and on Help → Check for Updates, whether a newer release exists: it fetches a small JSON file that the release workflow publishes with each release — `{ "version": "2.1.1", "url": "https://…/photos.jpeg-Setup-2.1.1-x64.exe", "sha256": "<hex SHA-256 of that file>", "notes": "…" }`. When the version there is higher, it says so; on your yes it downloads the Setup program, verifies its SHA-256 against the manifest, and runs it to update in place and reopen. Nothing is sent but the request for that file, and nothing is installed without being asked. An install from the lite Setup is offered the lite Setup; a Store install never checks (the Store updates it). The address is `<UpdateUrl>` in `windows/PhotosJpeg.csproj`: point it at a file you host instead, or empty it and the app never checks.
 
 While developing, `dotnet run` in `windows/` starts the app; set `PJ_WEB_ROOT` to the `src` folder to pick up editor changes without rebuilding, and `PJ_DATA_DIR` to use a separate catalog folder.
 
@@ -341,7 +341,7 @@ windows/           Native Windows app (C#: WinForms + WebView2 + Windows Imaging
   Storage.cs         Catalog, thumbnails, folder scanning, sidecars
   VideoTool.cs       Optimized media (ffmpeg, Blackmagic RAW helper, vendor converters)
   Log.cs             The app's log file (Help → Show Log)
-  Updater.cs         Update check against a hosted manifest (off unless <UpdateUrl> is set)
+  Updater.cs         Update check against a hosted manifest (<UpdateUrl>: the GitHub releases)
   installer/         The Setup / Uninstall program (.NET Framework 4.8, part of Windows)
   SystemImage.cs     Windows Imaging Component fallback decoder
 tests/             Automated tests for the Windows app: testsun.ps1 (see its header; uses a scratch catalog)

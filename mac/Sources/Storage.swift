@@ -26,6 +26,7 @@ final class Storage {
     var catalogURL: URL { root.appendingPathComponent("catalog.json") }
     var thumbsURL: URL { root.appendingPathComponent("thumbs", isDirectory: true) }
     private var lastBackup = Date.distantPast
+    private var dailyBackupDone = false
 
     private init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -59,6 +60,7 @@ final class Storage {
     }
 
     func saveCatalog(_ json: String) throws {
+        if !dailyBackupDone { dailyBackupDone = true; dailyBackup() }      // see Housekeeping.swift
         if Date().timeIntervalSince(lastBackup) > 600, fm.fileExists(atPath: catalogURL.path) {
             lastBackup = Date()
             let bak = catalogURL.appendingPathExtension("bak")

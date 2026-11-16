@@ -47,6 +47,9 @@ class Bridge(private val activity: MainActivity, private val storage: Storage) {
             "loadCatalog" -> bg { storage.loadCatalog() }
             "saveCatalog" -> bg { storage.saveCatalog(a.optString("json")); true }
             "saveThumb" -> bg { storage.saveThumb(a.optString("id"), Base64.decode(a.optString("data"), Base64.DEFAULT)); true }
+            "listBackups" -> bg { storage.listBackups() }
+            "backupNow" -> bg { storage.backupNow() }
+            "restoreBackup" -> bg { storage.restoreBackup(a.optString("name")) }
             "deleteThumb" -> bg { storage.deleteThumb(a.optString("id")); true }
             "modelStatus" -> bg { storage.modelStatus() }
             "modelFetch" -> bg {

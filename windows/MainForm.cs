@@ -100,7 +100,7 @@ public sealed class MainForm : Form
         s.IsBuiltInErrorPageEnabled = false;
 
         await core.AddScriptToExecuteOnDocumentCreatedAsync(
-            $"window.__pjInfo = {{ version: {JsonSerializer.Serialize(Version)}, platform: 'windows', packaged: {(Program.IsPackaged ? "true" : "false")} }};");
+            $"window.__pjInfo = {{ version: {JsonSerializer.Serialize(Version)}, platform: 'windows', packaged: {(Program.IsPackaged ? "true" : "false")}, memoryGb: {Math.Round(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1073741824.0)} }};");
 
         new ResourceServer(core, Version).Attach();
         bridge = new Bridge(this, core);
@@ -309,7 +309,7 @@ public sealed class MainForm : Form
         var current = Updater.Current.ToString(3);
         if (!Updater.Configured)
         {
-            if (interactive) MessageBox.Show(this, $"This is photos.jpeg {current}.\n\nThis build has no update address set, so it can't check for newer versions.", title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (interactive) MessageBox.Show(this, $"This is photos.jpeg {current}.\n\n" + (Program.IsPackaged ? "This copy came from the Microsoft Store, which keeps it up to date." : "This build has no update address set, so it can't check for newer versions."), title, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         UpdateInfo? info;
@@ -420,6 +420,7 @@ public sealed class MainForm : Form
                 Cmd("Merge to HDR…", "mergeHdr"),
                 Cmd("Merge to HDR (editable DNG)…", "mergeHdrDng"),
                 Cmd("Merge to Panorama…", "mergePano"),
+                Cmd("Merge to Focus Stack…", "mergeStack"),
                 Sep(),
                 Sub("Set Rating", [.. Enumerable.Range(0, 6).Select(n => Cmd(n == 0 ? "None" : new string('★', n), $"rating:{n}", n.ToString()))]),
                 Sub("Set Flag", Cmd("Pick", "flag:1", "P"), Cmd("Unflagged", "flag:0", "U"), Cmd("Reject", "flag:-1", "X")),

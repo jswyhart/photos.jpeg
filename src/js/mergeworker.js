@@ -12,8 +12,13 @@
  *           when the focal length is known, evened out in brightness and
  *           feathered together.
  *
+ * Focus stack: photos of one scene focused at different distances are
+ *           lined up (focusing changes the picture's size a little) and
+ *           every detail, at every scale, is taken from the photo that
+ *           shows it sharpest — so the result is sharp from front to back.
+ *
  * in:  { op: 'reset' } · { op: 'image', w, h, rgb: Uint8Array(w·h·3) }
- *      { op: 'hdr', id } · { op: 'pano', id, focal: [pixels at full size, or 0], maxPixels }
+ *      { op: 'hdr', id } · { op: 'pano', id, focal: [pixels at full size, or 0], maxPixels } · { op: 'stack', id }
  * out: { id, progress, text } while working, then
  *      { id, w, h, rgb16: Uint16Array(w·h·3), stats } or { id, error }
  * ===================================================================== */
@@ -253,6 +258,75 @@ function hdr(id, linear) {
 
 /* ---------------- panorama ---------------- */
 /** Corners of a small brightness image with a description of the patch around each. */
+/* ---------------- focus stack ---------------- */
+function stack(id) {
+  const K = imgs.length;
+  if (K < 2) throw new Error('Choose at least two photos of the same scene, focused at different distances');
+  const w = imgs[0].w, h = imgs[0].h, N = w * h;
+  for (const im of imgs) if (im.w !== w || im.h !== h) throw new Error('The photos are not the same size — a focus stack needs photos from one camera position');
+  const say = (p, text) => tell({ id, progress: p, text });
+  // 1. Line them up. Focusing nearer or farther also changes how large things are drawn, so each photo is
+  // redrawn to sit on its neighbour (which is already in place), working outwards from the middle one:
+  // neighbours are focused alike and share the most sharp corners.
+  say(0.02, 'Lining up the photos');
+  const mid = K >> 1, align = new Array(K).fill('');
+  align[mid] = 'reference';
+  let seed = 4321; const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const lineUp = (i, onto) => {
+    const A = small(imgs[i], 800), B = small(imgs[onto], 800), ca = corners(A, 1500), cb = corners(B, 1500), m = matchCorners(ca, cb);
+    const r = m.length >= 30 ? ransac(m.map(([a]) => [ca[a].x, ca[a].y]), m.map(([, b]) => [cb[b].x, cb[b].y]), rand) : null;
+    if (!(r && r.inliers.length >= 25)) { align[i] = 'left as it is'; return; }
+    const Hi = inv(r.H), st = A.step, src = imgs[i].rgb, out = new Uint8Array(N * 3);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const p = apply(Hi, (x + 0.5) / st - 0.5, (y + 0.5) / st - 0.5);
+      const fx = Math.min(w - 1.001, Math.max(0, (p[0] + 0.5) * st - 0.5)), fy = Math.min(h - 1.001, Math.max(0, (p[1] + 0.5) * st - 0.5));
+      const ix = fx | 0, iy = fy | 0, tx = fx - ix, ty = fy - iy, q = (iy * w + ix) * 3, q2 = q + w * 3, o = (y * w + x) * 3;
+      for (let k = 0; k < 3; k++) out[o + k] = (src[q + k] * (1 - tx) + src[q + 3 + k] * tx) * (1 - ty) + (src[q2 + k] * (1 - tx) + src[q2 + 3 + k] * tx) * ty + 0.5;
+    }
+    imgs[i] = { w, h, rgb: out };
+    align[i] = 'matched on ' + r.inliers.length + ' corners';
+  };
+  for (let i = mid + 1; i < K; i++) { say(0.02 + 0.13 * (i - mid) / K, 'Lining up the photos'); lineUp(i, i - 1); }
+  for (let i = mid - 1; i >= 0; i--) { say(0.02 + 0.13 * (K - i) / K, 'Lining up the photos'); lineUp(i, i + 1); }
+  // 2. Each photo is split into its detail at every scale (fine texture, edges, broad shapes). At each
+  // scale and place, the detail is kept from the photo where it is strongest — that is where it is in
+  // focus. Only the best so far is held, so memory does not grow with the number of photos.
+  const sizes = []; { let lw = w, lh = h; while (sizes.length < 7 && Math.min(lw, lh) >= 32) { sizes.push([lw, lh]); lw = (lw + 1) >> 1; lh = (lh + 1) >> 1; } }
+  const L = sizes.length;
+  let best = null, base = null; const used = new Float64Array(K);
+  for (let k = 0; k < K; k++) {
+    say(0.15 + 0.75 * k / K, `Finding what is sharp in photo ${k + 1} of ${K}`);
+    const src = imgs[k].rgb, planes = [new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+    for (let i = 0, q = 0; i < N; i++, q += 3) { const r = src[q], g = src[q + 1], b = src[q + 2]; planes[0][i] = r * 0.299 + g * 0.587 + b * 0.114; planes[1][i] = r; planes[2][i] = g; planes[3][i] = b; }
+    imgs[k] = { w, h, rgb: null };
+    const pyr = planes.map((pl) => {
+      const out = []; let cur = pl, cw = w, ch = h;
+      for (let l = 0; l < L; l++) { const hf = half(cur, cw, ch), up = grow(hf.d, hf.w, hf.h, cw, ch); for (let i = 0; i < cur.length; i++) cur[i] -= up[i]; out.push(cur); cur = hf.d; cw = hf.w; ch = hf.h; }
+      out.push(cur);
+      return out;
+    });
+    const energy = pyr[0].slice(0, L).map((d, l) => { const a = new Float32Array(d.length); for (let i = 0; i < d.length; i++) a[i] = d[i] < 0 ? -d[i] : d[i]; return blur5(a, sizes[l][0], sizes[l][1]); });
+    if (!best) { best = { e: energy, c: [pyr[1].slice(0, L), pyr[2].slice(0, L), pyr[3].slice(0, L)], from: new Uint8Array(N) }; base = [pyr[1][L], pyr[2][L], pyr[3][L]]; continue; }
+    for (let l = 0; l < L; l++) {
+      const e = energy[l], be = best.e[l], n = e.length, r0 = pyr[1][l], g0 = pyr[2][l], b0 = pyr[3][l], br = best.c[0][l], bg = best.c[1][l], bb = best.c[2][l];
+      for (let i = 0; i < n; i++) if (e[i] > be[i]) { be[i] = e[i]; br[i] = r0[i]; bg[i] = g0[i]; bb[i] = b0[i]; if (l === 0) best.from[i] = k; }
+    }
+    for (let c = 0; c < 3; c++) { const s = pyr[c + 1][L], d = base[c]; for (let i = 0; i < d.length; i++) d[i] += s[i]; }
+  }
+  for (let i = 0; i < N; i += 7) used[best.from[i]]++;
+  // 3. Put the scales back together
+  say(0.92, 'Putting the picture together');
+  const out = new Uint16Array(N * 3), lastW = (sizes[L - 1][0] + 1) >> 1, lastH = (sizes[L - 1][1] + 1) >> 1;
+  for (let c = 0; c < 3; c++) {
+    let cur = base[c], cw = lastW, ch = lastH;
+    for (let i = 0; i < cur.length; i++) cur[i] /= K;
+    for (let l = L - 1; l >= 0; l--) { const up = grow(cur, cw, ch, sizes[l][0], sizes[l][1]), d = best.c[c][l]; for (let i = 0; i < up.length; i++) up[i] += d[i]; cur = up; cw = sizes[l][0]; ch = sizes[l][1]; best.c[c][l] = null; }
+    for (let i = 0; i < N; i++) { const v = cur[i] * 257; out[i * 3 + c] = v <= 0 ? 0 : v >= 65535 ? 65535 : v + 0.5; }
+  }
+  const total = used.reduce((a, b) => a + b, 0) || 1;
+  return { w, h, rgb16: out, stats: { align, share: Array.from(used, v => +(v / total).toFixed(3)) } };
+}
+
 function corners(g, max) {
   const { w, h } = g, b = blur5(g.d, w, h), bb = blur5(b, w, h), R = new Float32Array(w * h);
   const ixx = new Float32Array(w * h), iyy = new Float32Array(w * h), ixy = new Float32Array(w * h);
@@ -461,10 +535,10 @@ if (typeof self !== 'undefined' && typeof window === 'undefined' && typeof self.
     try {
       if (m.op === 'reset') { imgs = []; return; }
       if (m.op === 'image') { imgs.push({ w: m.w, h: m.h, rgb: m.rgb }); return; }
-      const r = m.op === 'hdr' ? hdr(m.id, !!m.linear) : pano(m.id, m.focal, m.maxPixels || 40e6);
+      const r = m.op === 'hdr' ? hdr(m.id, !!m.linear) : m.op === 'stack' ? stack(m.id) : pano(m.id, m.focal, m.maxPixels || 40e6);
       imgs = [];
       self.postMessage({ id: m.id, w: r.w, h: r.h, rgb16: r.rgb16, stats: r.stats, preview: r.preview || null }, r.preview ? [r.rgb16.buffer, r.preview.rgb.buffer] : [r.rgb16.buffer]);
     } catch (e) { imgs = []; self.postMessage({ id: m.id, error: String(e && e.message || e) }); }
   };
 }
-if (typeof module !== 'undefined') module.exports = { hdr, pano, setImages: (list) => { imgs = list; }, _test: { homography, apply, shiftBetween, small } };
+if (typeof module !== 'undefined') module.exports = { hdr, pano, stack, setImages: (list) => { imgs = list; }, _test: { homography, apply, shiftBetween, small } };

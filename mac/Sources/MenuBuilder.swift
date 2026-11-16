@@ -92,6 +92,8 @@ enum MenuBuilder {
         photo.addItem(cmd("Merge to HDR…", "mergeHdr"))
         photo.addItem(cmd("Merge to HDR (editable DNG)…", "mergeHdrDng"))
         photo.addItem(cmd("Merge to Panorama…", "mergePano"))
+        photo.addItem(cmd("Merge to Focus Stack…", "mergeStack"))
+        photo.addItem(cmd("Rename or Move…", "batchRename"))
         photo.addItem(.separator())
         photo.addItem(cmd("New Snapshot…", "newSnapshot", "n", [.command]))
         photo.addItem(cmd("New Develop Preset…", "newPreset", "n", [.command, .shift]))
@@ -141,6 +143,7 @@ enum MenuBuilder {
         let help = NSMenu(title: "Help")
         help.addItem(cmd("Keyboard Shortcuts", "shortcuts", "/", [.command]))
         help.addItem(cmd("Clean Up Catalog…", "cleanCatalog"))
+        help.addItem(cmd("Catalog Backups…", "catalogBackups"))
         let folder = NSMenuItem(title: "Open Catalog Folder", action: #selector(AppDelegate.openCatalogFolder(_:)), keyEquivalent: "")
         folder.target = t
         help.addItem(folder)

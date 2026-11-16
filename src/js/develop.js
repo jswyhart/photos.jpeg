@@ -759,7 +759,14 @@
         ...(PJ.Proof && PJ.Proof.list().some(p => p.id === cur) ? [h('option', { value: '-' }, 'Forget this printer profile')] : []));
       proofSel.value = [...proofSel.options].some(o => o.value === cur) ? cur : '';
       if (proofSel.value !== cur) viewer.st.proof = false;
+      // a printer profile is chosen: what the proof shows
+      const t = PJ.Proof && viewer.st.proof ? PJ.Proof.getSync(viewer.st.proof) : null;
+      paperSel.style.display = t && t.paper ? '' : 'none';
+      paperSel.value = viewer.st.proofPaper || '';
     };
+    const paperSel = h('select', { title: 'Paper and ink: white becomes the paper, black the densest ink, and colours out of reach are pulled in as the printer would. A guide, not a measured match.' },
+      h('option', { value: '' }, 'Mark what cannot be printed'), h('option', { value: 'mark' }, 'Show paper and ink, and mark'), h('option', { value: 'only' }, 'Show paper and ink'));
+    paperSel.addEventListener('change', () => { viewer.st.proofPaper = paperSel.value || false; viewer.update('commit'); });
     const setProof = async (v) => {
       if (v && v !== 'srgb' && v !== 'adobe') { UI.activity('Reading the printer profile…', null); try { if (!(await PJ.Proof.get(v))) v = ''; } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); v = ''; } UI.activity(''); }
       viewer.st.proof = v || false; fillProof(); viewer.update('commit');
@@ -783,7 +790,7 @@
       inp.click();
     });
     const proofChk = { set: () => fillProof() };
-    const proofRow = h('div', { class: 'wide-row' }, proofSel);
+    const proofRow = h('div', { class: 'wide-row' }, proofSel, paperSel);
     const hasP3 = () => { const src = photo && E.cachedSource(photo); return !!(photo && photo.kind !== 'video' && (photo.isRaw || (src && src.input && src.input.space === 'p3'))); };
     controls.push({ sync: () => {
       const on = hasP3();

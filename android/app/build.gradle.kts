@@ -15,12 +15,24 @@ android {
         versionName = "2.1.1"
     }
 
+    // Your own release key: point PJ_KEYSTORE at the keystore file and give PJ_KEYSTORE_PASSWORD,
+    // PJ_KEY_ALIAS and PJ_KEY_PASSWORD (environment variables; the release workflow fills them from
+    // the repository's secrets). Without them `assembleRelease` uses the debug key, so it still
+    // produces an installable APK — but not one to publish.
+    val keystore = System.getenv("PJ_KEYSTORE")?.takeIf { it.isNotBlank() && file(it).exists() }
+    signingConfigs {
+        if (keystore != null) create("release") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("PJ_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("PJ_KEY_ALIAS")
+            keyPassword = System.getenv("PJ_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Uses the debug key so `assembleRelease` produces an installable APK out of the box.
-            // Replace with your own signingConfig before publishing to Google Play.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (keystore != null) "release" else "debug")
         }
     }
     compileOptions {

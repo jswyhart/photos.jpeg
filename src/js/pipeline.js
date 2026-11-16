@@ -1396,7 +1396,7 @@
     }
   }
 
-  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn, check, cube, cubeN) {
+  function stageOutput(R, G, B, w, reg0, reg, clipHi, clipLo, ovW, want16, conv, warn, check, cube, cubeN, paper, paperN, noMark) {
     if (check) gamutTables();
     if (conv) gamutTables();
     const ox = reg0.x - reg.x, oy = reg0.y - reg.y;
@@ -1419,6 +1419,17 @@
           const o0 = (iz * cubeN + iy) * cubeN + ix, o1 = o0 + cubeN, o2 = o0 + cubeN * cubeN, o3 = o2 + cubeN;
           const v = ((cube[o0] * (1 - tx) + cube[o0 + 1] * tx) * (1 - ty) + (cube[o1] * (1 - tx) + cube[o1 + 1] * tx) * ty) * (1 - tz) + ((cube[o2] * (1 - tx) + cube[o2 + 1] * tx) * (1 - ty) + (cube[o3] * (1 - tx) + cube[o3 + 1] * tx) * ty) * tz;
           if (v >= 0.5) outside = true;
+          if (paper) {
+            // … and "show paper and ink": the colour as that printer and paper give it back
+            const n = paperN, gx = (x <= 0 ? 0 : x >= 1 ? 1 : x) * (n - 1), gy = (y <= 0 ? 0 : y >= 1 ? 1 : y) * (n - 1), gz = (z <= 0 ? 0 : z >= 1 ? 1 : z) * (n - 1);
+            const jx = Math.min(n - 2, gx | 0), jy = Math.min(n - 2, gy | 0), jz = Math.min(n - 2, gz | 0), ux = gx - jx, uy = gy - jy, uz = gz - jz;
+            const p0 = ((jz * n + jy) * n + jx) * 3, p1 = p0 + n * 3, p2 = p0 + n * n * 3, p3 = p2 + n * 3;
+            const w000 = (1 - ux) * (1 - uy) * (1 - uz), w100 = ux * (1 - uy) * (1 - uz), w010 = (1 - ux) * uy * (1 - uz), w110 = ux * uy * (1 - uz), w001 = (1 - ux) * (1 - uy) * uz, w101 = ux * (1 - uy) * uz, w011 = (1 - ux) * uy * uz, w111 = ux * uy * uz;
+            x = paper[p0] * w000 + paper[p0 + 3] * w100 + paper[p1] * w010 + paper[p1 + 3] * w110 + paper[p2] * w001 + paper[p2 + 3] * w101 + paper[p3] * w011 + paper[p3 + 3] * w111;
+            y = paper[p0 + 1] * w000 + paper[p0 + 4] * w100 + paper[p1 + 1] * w010 + paper[p1 + 4] * w110 + paper[p2 + 1] * w001 + paper[p2 + 4] * w101 + paper[p3 + 1] * w011 + paper[p3 + 4] * w111;
+            z = paper[p0 + 2] * w000 + paper[p0 + 5] * w100 + paper[p1 + 2] * w010 + paper[p1 + 5] * w110 + paper[p2 + 2] * w001 + paper[p2 + 5] * w101 + paper[p3 + 2] * w011 + paper[p3 + 5] * w111;
+            if (noMark) outside = false;
+          }
         }
         if (check) {
           // soft proof for a space the screen is not narrowed to (Adobe RGB): the picture stays as it is, what that space cannot hold is marked
@@ -1574,7 +1585,8 @@
     let ovW = null;
     if (ovIdx >= 0 && s.masks[ovIdx] && SX) ovW = maskWeights(s.masks[ovIdx], SX, SY, Y0, N, W, H, C0, s.masks);
     const o = stageOutput(R, G, B, w, reg0, reg, opts.clipping && opts.clipping.hi, opts.clipping && opts.clipping.lo, ovW, !!opts.out16, wide && opts.outSpace !== 'p3' ? P3_TO_SRGB : null, !!opts.gamutWarn, wide && opts.outSpace === 'p3' && opts.gamutWarn === 'adobe' ? P3_TO_ADOBE : null,
-      opts.gamutCube ? (wide ? opts.gamutCube.p3 : opts.gamutCube.srgb) : null, opts.gamutCube ? opts.gamutCube.n : 0);
+      opts.gamutCube ? (wide ? opts.gamutCube.p3 : opts.gamutCube.srgb) : null, opts.gamutCube ? opts.gamutCube.n : 0,
+      opts.gamutCube && opts.gamutCube.paper ? (wide ? opts.gamutCube.paper.p3 : opts.gamutCube.paper.srgb) : null, opts.gamutCube && opts.gamutCube.paper ? opts.gamutCube.paper.n : 0, !!(opts.gamutCube && opts.gamutCube.noMark));
     return {
       space: wide && opts.outSpace === 'p3' ? 'p3' : 'srgb',
       data: o.out, data16: o.out16, width: o.outw, height: o.outh,

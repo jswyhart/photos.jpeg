@@ -7,6 +7,12 @@
 //     "sha256":  "<hex SHA-256 of that file>",
 //     "notes":   "What's new, in a line or two" }
 //
+// The published builds point at the GitHub releases: the release workflow puts an update.json (and an
+// update-lite.json for the Setup without the models) next to each release's files, and
+// …/releases/latest/download/update.json always answers with the newest one. An install that has
+// no models of its own (the lite Setup) asks for update-lite.json instead. A Store install never
+// checks: the Store updates it.
+//
 // When its version is higher than this build's, Help → Check for Updates offers to install it:
 // the Setup program is downloaded to the temp folder, its SHA-256 is checked against the
 // manifest, and it is started to update the app in place and reopen it. Nothing is sent
@@ -24,12 +30,28 @@ public sealed record UpdateInfo(Version Version, string Url, string Sha256, stri
 public static class Updater
 {
     /// <summary>Where the manifest lives: PJ_UPDATE_URL (testing) or the address built into the app. Empty = no update checks.</summary>
-    public static string ManifestUrl =>
-        Environment.GetEnvironmentVariable("PJ_UPDATE_URL") is { Length: > 0 } env ? env :
-        Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
-            .FirstOrDefault(a => a.Key == "UpdateUrl")?.Value ?? "";
+    public static string ManifestUrl
+    {
+        get
+        {
+            if (Environment.GetEnvironmentVariable("PJ_UPDATE_URL") is { Length: > 0 } env) return env;
+            var url = Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => a.Key == "UpdateUrl")?.Value ?? "";
+            return IsLite && url.EndsWith("/update.json", StringComparison.Ordinal) ? url[..^"update.json".Length] + "update-lite.json" : url;
+        }
+    }
 
-    public static bool Configured => Allowed(ManifestUrl);
+    /// <summary>An install made by the lite Setup: no neural-network models came with the app.</summary>
+    static bool IsLite
+    {
+        get
+        {
+            try { var ml = Path.Combine(AppContext.BaseDirectory, "web", "vendor", "ml"); return Directory.Exists(ml) && Directory.GetFiles(ml, "*.onnx").Length == 0; }
+            catch { return false; }
+        }
+    }
+
+    public static bool Configured => !Program.IsPackaged && Allowed(ManifestUrl);
 
     public static Version Current => Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
 

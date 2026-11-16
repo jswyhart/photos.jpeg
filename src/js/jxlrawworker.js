@@ -6,8 +6,12 @@
  * decodes it at its full bit depth; the picture is read out in bands, each
  * handed over as a 16-bit PNG, which is unpacked here.
  *
- * in:  { id, data: Uint8Array — the JPEG XL image, width, height }
- * out: { id, progress } while working, then { id, rgb16: Uint16Array(w·h·3) — 0…65535 } or { id, error }
+ * Several of these threads can share one picture, each reading its own
+ * strip of rows (top, rows), which is what makes a 50-megapixel file
+ * bearable: the decoder itself works on one processor only.
+ *
+ * in:  { id, data: Uint8Array — the JPEG XL image, width, height, top?, rows? }
+ * out: { id, progress } while working, then { id, rgb16: Uint16Array(w·rows·3) — 0…65535, top, rows } or { id, error }
  * ===================================================================== */
 import init, { JxlImage } from '../vendor/jxl/jxl_oxide_wasm.js';
 let ready = null;
@@ -47,16 +51,17 @@ self.onmessage = async (ev) => {
     if (!img.tryInit()) throw new Error('the JPEG XL data is incomplete');
     const W = img.width, H = img.height;
     if (m.width && (W !== m.width || H !== m.height)) throw new Error(`the JPEG XL picture is ${W}×${H}, the file says ${m.width}×${m.height}`);
-    const out = new Uint16Array(W * H * 3), band = 384;
-    for (let y = 0; y < H; y += band) {
-      const hh = Math.min(band, H - y);
-      img.renderingRegion = { left: 0, top: y, width: W, height: hh };
+    const top = Math.max(0, m.top | 0), rows = Math.min(H - top, m.rows > 0 ? m.rows : H);
+    const out = new Uint16Array(W * rows * 3), band = 384;
+    for (let y = 0; y < rows; y += band) {
+      const hh = Math.min(band, rows - y);
+      img.renderingRegion = { left: 0, top: top + y, width: W, height: hh };
       const png = img.render().encodeToPng();          // handing the band over as a PNG also releases it
       await pngRows(png, out, W, y);
-      self.postMessage({ id: m.id, progress: (y + hh) / H });
+      self.postMessage({ id: m.id, progress: (y + hh) / rows });
     }
     try { img.free(); } catch (_) { }
-    self.postMessage({ id: m.id, rgb16: out, width: W, height: H }, [out.buffer]);
+    self.postMessage({ id: m.id, rgb16: out, width: W, height: H, top, rows }, [out.buffer]);
   } catch (e) {
     self.postMessage({ id: m.id, error: String(e && e.message || e) });
   }

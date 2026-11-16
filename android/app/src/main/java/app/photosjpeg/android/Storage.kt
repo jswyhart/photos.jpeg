@@ -70,8 +70,61 @@ class Storage(private val context: Context) {
         return null
     }
 
+    // ---------------- catalog backups (as in the desktop apps) ----------------
+
+    private val backupsDir = File(root, "backups")
+    private var dailyBackupDone = false
+    private fun isJson(f: File) = runCatching { JSONObject(f.readText()); true }.getOrDefault(false)
+    private fun stamp(format: String) = java.text.SimpleDateFormat(format, java.util.Locale.US).format(java.util.Date())
+
+    /** Before the first save of a session the catalog as it was is copied to backups/catalog-YYYY-MM-DD.json (the newest 14 kept). */
+    private fun dailyBackup() {
+        if (dailyBackupDone) return
+        dailyBackupDone = true
+        runCatching {
+            if (!catalogFile.exists() || !isJson(catalogFile)) return       // never keep a damaged file as a backup
+            val target = File(backupsDir, "catalog-" + stamp("yyyy-MM-dd") + ".json")
+            if (target.exists()) return
+            backupsDir.mkdirs()
+            catalogFile.copyTo(target, overwrite = false)
+            val daily = Regex("^catalog-\\d{4}-\\d{2}-\\d{2}\\.json$")
+            (backupsDir.listFiles() ?: emptyArray()).filter { daily.matches(it.name) }.sortedByDescending { it.name }.drop(14).forEach { it.delete() }
+        }
+    }
+
+    fun listBackups(): JSONArray {
+        val out = JSONArray()
+        (backupsDir.listFiles() ?: emptyArray()).filter { it.name.startsWith("catalog-") && it.name.endsWith(".json") }
+            .sortedByDescending { it.lastModified() }
+            .forEach { out.put(JSONObject().put("name", it.name).put("size", it.length()).put("time", it.lastModified())) }
+        return out
+    }
+
+    @Synchronized
+    fun backupNow(kind: String = "manual"): JSONObject {
+        if (!catalogFile.exists()) throw java.io.IOException("There is no catalog to back up yet")
+        if (!isJson(catalogFile)) throw java.io.IOException("The catalog on disk cannot be read, so it was not copied")
+        backupsDir.mkdirs()
+        val name = "catalog-" + kind + "-" + stamp("yyyy-MM-dd-HHmmss") + ".json"
+        catalogFile.copyTo(File(backupsDir, name), overwrite = true)
+        return JSONObject().put("name", name)
+    }
+
+    /** Put a backup in the catalog's place; what is there now is kept first, so a restore can itself be undone. */
+    @Synchronized
+    fun restoreBackup(name: String): JSONObject {
+        if (name != File(name).name || !name.startsWith("catalog-") || !name.endsWith(".json")) throw java.io.IOException("That is not a catalog backup")
+        val src = File(backupsDir, name)
+        if (!src.exists()) throw java.io.IOException("That backup is no longer there")
+        if (!isJson(src)) throw java.io.IOException("That backup cannot be read, so the catalog was left as it is")
+        val kept: Any = if (catalogFile.exists()) backupNow("before-restore").getString("name") else JSONObject.NULL
+        src.copyTo(catalogFile, overwrite = true)
+        return JSONObject().put("restored", name).put("kept", kept)
+    }
+
     @Synchronized
     fun saveCatalog(json: String) {
+        dailyBackup()
         if (catalogFile.exists() && System.currentTimeMillis() - catalogFile.lastModified() > 10 * 60_000) {
             catalogFile.copyTo(File(root, "catalog.json.bak"), overwrite = true)
         }

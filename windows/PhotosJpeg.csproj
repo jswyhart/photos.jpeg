@@ -16,7 +16,7 @@
     <Description>RAW photo &amp; video editor</Description>
     <Version>2.1.1</Version>
     <!-- Address of the update manifest (see Updater.cs). Empty: the app never checks for updates. -->
-    <UpdateUrl></UpdateUrl>
+    <UpdateUrl>https://github.com/jswyhart/photos.jpeg/releases/latest/download/update.json</UpdateUrl>
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
