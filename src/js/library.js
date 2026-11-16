@@ -455,8 +455,8 @@
       h('button', { class: 'btn sm', onclick: () => app.importFolder() }, icon('folder-plus'), 'Import Folder…'),
       h('span', { class: 'sep' }),
       h('button', { class: 'btn sm', title: 'Re-check the photos in this view: missing files, changes on disk, metadata and previews (F5)', onclick: () => app.refreshView() }, icon('arrows-rotate'), 'Refresh'),
-      h('button', { class: 'btn sm', title: 'Slideshow (Ctrl+Enter)', onclick: () => app.slideshow() }, icon('play'), 'Slideshow'),
-      h('button', { class: 'btn sm', title: 'Export selected (Ctrl+Shift+E)', onclick: () => app.exportSelected() }, icon('file-export'), 'Export…'),
+      h('button', { class: 'btn sm', title: UI.keys('Slideshow (Ctrl+Enter)'), onclick: () => app.slideshow() }, icon('play'), 'Slideshow'),
+      h('button', { class: 'btn sm', title: UI.keys('Export selected (Ctrl+Shift+E)'), onclick: () => app.exportSelected() }, icon('file-export'), 'Export…'),
       h('button', { class: 'btn sm', title: 'Find duplicate and near-duplicate photos', onclick: () => PJ.Dupes.open(app) }, icon('clone'), 'Duplicates'),
       h('span', { class: 'spacer' }), countEl, h('span', { class: 'sep' }),
       h('label', { class: 'lbl size-lbl' }, 'Thumbnails'), sizeRange);
@@ -610,7 +610,7 @@
       qdGrid,
       h('div', { class: 'btnrow' },
         h('button', { class: 'btn sm grow', onclick: () => app.autoToneSelection() }, icon('wand-magic-sparkles'), 'Auto Tone'),
-        h('button', { class: 'btn sm grow', title: 'Auto color grade the selection (Ctrl+Shift+G) — right-click to pick a look', onclick: () => app.autoGradeSelection(), oncontextmenu: (e) => { e.preventDefault(); app.gradeLookMenu(e.clientX, e.clientY); } }, icon('palette'), 'Auto Grade'),
+        h('button', { class: 'btn sm grow', title: UI.keys('Auto color grade the selection (Ctrl+Shift+G) — right-click to pick a look'), onclick: () => app.autoGradeSelection(), oncontextmenu: (e) => { e.preventDefault(); app.gradeLookMenu(e.clientX, e.clientY); } }, icon('palette'), 'Auto Grade'),
         h('button', { class: 'btn sm grow', onclick: () => app.resetSelection() }, icon('rotate-left'), 'Reset All')));
     function quickAdjust(key, delta, label) {
       const ps = app.selectedPhotos();

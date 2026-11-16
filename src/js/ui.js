@@ -286,7 +286,7 @@
     items.forEach(it => {
       if (it === '-') { ctxEl.appendChild(h('div', { class: 'cs' })); return; }
       if (!it || it.hidden) return;
-      const row = h('div', { class: 'ci' }, it.icon ? icon(it.icon) : h('i'), h('span', null, it.label), it.key ? h('span', { class: 'k' }, it.key) : null);
+      const row = h('div', { class: 'ci' }, it.icon ? icon(it.icon) : h('i'), h('span', null, it.label), it.key ? h('span', { class: 'k' }, keys(it.key)) : null);
       if (it.disabled) row.style.opacity = .4;
       else row.addEventListener('click', () => { closeMenu(); it.action(); });
       ctxEl.appendChild(row);
@@ -343,8 +343,25 @@
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+  /* ---------------- platform wording ---------------- */
+  // Shortcuts are written the Windows way ("Ctrl+Shift+E") and the key handlers take Ctrl or ⌘ alike.
+  // On a Mac they are shown as macOS writes them: modifiers as symbols in the order ⌥⇧⌘, then the key ("⇧⌘E").
+  const isMac = (global.PJ.API && global.PJ.API.platform === 'macos') || /Mac/i.test((global.navigator && global.navigator.platform) || '');
+  const MAC_MOD = { Alt: '⌥', Shift: '⇧', Ctrl: '⌘' };
+  const MAC_KEY = { Enter: '↩', Del: '⌫' };
+  function keys(s) {
+    if (!isMac || !s) return s;
+    return String(s).replace(/(?:(?:Ctrl|Alt|Shift)\+)+[^\s)]+|\bDel\b/g, (m) => {
+      const parts = m.split('+'), key = parts.pop();
+      return ['Alt', 'Shift', 'Ctrl'].filter(x => parts.includes(x)).map(x => MAC_MOD[x]).join('') + (MAC_KEY[key] || key);
+    });
+  }
+  /** What the settings window is called: Settings on a Mac (the macOS name since Ventura), Preferences elsewhere. */
+  const settingsName = isMac ? 'Settings' : 'Preferences';
+
   global.PJ.UI = {
     h, icon, $, $$, debounce, emitter, toast, slider, panel, modal, hasModal, topModal, prompt: promptText,
-    confirm: confirmBox, menu, closeMenu, activity, seg, checkbox, fmtBytes, fmtDate, escapeHtml, fmtSigned
+    confirm: confirmBox, menu, closeMenu, activity, seg, checkbox, fmtBytes, fmtDate, escapeHtml, fmtSigned,
+    isMac, keys, settingsName
   };
 })(window);

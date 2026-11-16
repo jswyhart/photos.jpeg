@@ -589,7 +589,7 @@
     styleSel.addEventListener('change', () => Cat.setPref('grade.style', styleSel.value));
     const strengthSeg = UI.seg([{ label: 'Subtle', value: 'subtle' }, { label: 'Normal', value: 'normal' }, { label: 'Strong', value: 'strong' }],
       Cat.pref('grade.strength', 'normal'), (v) => Cat.setPref('grade.strength', v));
-    const autoGradeBtn = h('button', { class: 'btn sm primary', title: 'Analyse this photo and set the color grading wheels, vibrance and saturation (Ctrl+Shift+G)' }, icon('wand-magic-sparkles'), 'Auto');
+    const autoGradeBtn = h('button', { class: 'btn sm primary', title: UI.keys('Analyse this photo and set the color grading wheels, vibrance and saturation (Ctrl+Shift+G)') }, icon('wand-magic-sparkles'), 'Auto');
     autoGradeBtn.addEventListener('click', () => { if (photo) PJ.App.autoGradeSelection(styleSel.value, Cat.pref('grade.strength', 'normal')); });
     gradePanel.body.append(
       h('div', { class: 'auto-grade' }, h('div', { class: 'row', style: { gap: '6px' } }, styleSel, autoGradeBtn), h('div', { class: 'row', style: { marginTop: '6px', justifyContent: 'space-between' } }, h('span', { class: 'muted' }, 'Strength'), strengthSeg.el)),
@@ -945,7 +945,7 @@
 
     const footer = h('div', { style: { display: 'flex', gap: '6px', padding: '10px 12px', position: 'sticky', bottom: 0, background: 'var(--panel)', borderTop: '1px solid var(--border)' } },
       h('button', { class: 'btn grow', title: 'Apply the settings of the previously selected photo', onclick: () => previous() }, 'Previous'),
-      h('button', { class: 'btn grow', title: 'Reset all develop settings (Ctrl+Shift+R)', onclick: () => resetAll() }, 'Reset'));
+      h('button', { class: 'btn grow', title: UI.keys('Reset all develop settings (Ctrl+Shift+R)'), onclick: () => resetAll() }, 'Reset'));
 
     right.append(histWrap, toolstrip, toolPane, vidPanel.el, basic.el, lutPanel.el, curvePanel.el, hslPanel.el, gradePanel.el, detailPanel.el, lensPanel.el, transPanel.el, fxPanel.el, calPanel.el, footer);
 
@@ -1193,8 +1193,8 @@
     const cmp = UI.seg([
       { icon: 'square', value: 'single', title: 'Loupe (single view)' },
       { icon: 'table-columns', value: 'side', title: 'Before / After — left / right (Y)' },
-      { icon: 'grip-lines', value: 'topbottom', title: 'Before / After — top / bottom (Alt+Y)' },
-      { icon: 'arrows-left-right-to-line', value: 'split', title: 'Before / After — split (Shift+Y)' }
+      { icon: 'grip-lines', value: 'topbottom', title: UI.keys('Before / After — top / bottom (Alt+Y)') },
+      { icon: 'arrows-left-right-to-line', value: 'split', title: UI.keys('Before / After — split (Shift+Y)') }
     ], 'single', (v) => viewer.setCompare(v));
     const zoomSeg = UI.seg([{ label: 'Fit', value: 'fit' }, { label: 'Fill', value: 'fill' }, { label: '1:1', value: 1 }, { label: '2:1', value: 2 }], 'fit', (v) => viewer.setZoom(v));
     const beforeBtn = h('button', { class: 'btn sm', title: 'Hold to see the original (\\)' }, icon('eye'), 'Before');
@@ -1210,8 +1210,8 @@
       h('button', { class: 'btn sm', title: 'Cycle info overlay (I)', onclick: () => viewer.cycleInfo() }, icon('circle-info')),
       h('label', { class: 'lbl' }, 'Bg'), bgSel,
       h('span', { class: 'spacer' }),
-      h('button', { class: 'btn sm', title: 'Copy settings (Ctrl+Shift+C)', onclick: () => PJ.App.copySettings() }, icon('copy'), 'Copy…'),
-      h('button', { class: 'btn sm', title: 'Paste settings (Ctrl+Shift+V)', onclick: () => PJ.App.pasteSettings() }, icon('paste'), 'Paste'),
+      h('button', { class: 'btn sm', title: UI.keys('Copy settings (Ctrl+Shift+C)'), onclick: () => PJ.App.copySettings() }, icon('copy'), 'Copy…'),
+      h('button', { class: 'btn sm', title: UI.keys('Paste settings (Ctrl+Shift+V)'), onclick: () => PJ.App.pasteSettings() }, icon('paste'), 'Paste'),
       h('button', { class: 'btn sm', title: 'Sync settings to selected photos', onclick: () => PJ.App.syncSettings() }, icon('arrows-rotate'), 'Sync…'));
     viewer.events.on('zoom', () => { const z = viewer.st.zoom; zoomSeg.set(typeof z === 'number' && z !== 1 && z !== 2 ? null : z); drawNavigator(); });
     viewer.events.on('compare', () => cmp.set(viewer.st.compare));

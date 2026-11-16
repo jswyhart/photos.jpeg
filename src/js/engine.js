@@ -209,7 +209,11 @@
         return { dec: { pixels: r.pixels, input: r.input, width: r.width, height: r.height, isRaw: true, format: Dec.ext(photo.name).toUpperCase(), exif, note: r.note }, bytes };
       } catch (e) {
         console.warn('RAW development failed, using the embedded preview:', e && e.message);
-        if (preview) return { dec: preview, bytes };
+        if (preview) {
+          // a JPEG XL DNG (Galaxy S23 and later) is developed only when that is turned on: say where
+          if (!Cat.pref('raw.jxlDng', false) && PJ.Raw.jxlInDng(bytes)) preview.note = `Embedded preview · turn on JPEG XL DNGs in ${PJ.UI.settingsName}`;
+          return { dec: preview, bytes };
+        }
       }
     }
     try {
@@ -362,7 +366,11 @@
     })();
     loading.set(lkey, pr);
     try { return await pr; } catch (e) {
-      Cat.state.photos.filter(p => p.path === photo.path).forEach(p => { p.missing = true; });
+      // "missing" is for a file that is no longer there (or is on a drive that is offline); a file that is
+      // there but can't be read (empty, damaged) is not missing: the error says what went wrong instead
+      let gone = true;
+      try { if (API.stat) gone = !(await API.stat(photo.path)); } catch (_) { /* can't tell: treat it as gone */ }
+      if (gone) Cat.state.photos.filter(p => p.path === photo.path).forEach(p => { p.missing = true; });
       throw e;
     } finally { loading.delete(lkey); }
   }

@@ -554,7 +554,7 @@
   function syncSettings() {
     const p = activePhoto();
     const others = selectedPhotos().filter(x => x !== p);
-    if (!p || !others.length) return UI.toast('Select the photos to sync with (Ctrl/Shift-click in the filmstrip)', 'circle-info');
+    if (!p || !others.length) return UI.toast(`Select the photos to sync with (${UI.isMac ? '⌘' : 'Ctrl'}/Shift-click in the filmstrip)`, 'circle-info');
     const checks = PJ.Develop.groupChecks(Cat.pref('sync.groups', Cat.DEFAULT_SYNC));
     UI.modal({
       title: `Synchronize Settings to ${others.length} photo(s)`, icon: 'arrows-rotate', body: checks.el,
@@ -1238,7 +1238,7 @@
       ['O', 'Mask overlay (in masking)'], ['X', 'Swap crop orientation (in crop)'], ['Enter / Esc', 'Apply / cancel tool'],
       ['\\', 'Hold for before'], ['Y', 'Before/after side by side'], ['Shift+Y', 'Before/after split'], ['Alt+Y', 'Before/after top/bottom'],
       ['J', 'Clipping warnings'], ['Z', 'Toggle Fit / 100%'], ['Space + drag', 'Pan'], ['I', 'Cycle info overlay'],
-      ['Ctrl+Shift+C / V', 'Copy / paste settings'], ['Ctrl+Shift+S', 'Sync settings'], ['Ctrl+S', 'Save metadata to .xmp'], ['Ctrl+,', 'Preferences'], ["Ctrl+'", 'Virtual copy'],
+      ['Ctrl+Shift+C / V', 'Copy / paste settings'], ['Ctrl+Shift+S', 'Sync settings'], ['Ctrl+S', 'Save metadata to .xmp'], ['Ctrl+,', UI.settingsName], ["Ctrl+'", 'Virtual copy'],
       ['Ctrl+[ / ]', 'Rotate left / right'], ['Ctrl+Shift+U', 'Auto tone'], ['Ctrl+Shift+R', 'Reset settings'],
       ['Ctrl+Shift+G', 'Auto color grade'], ['Ctrl+N', 'New snapshot'], ['Ctrl+Shift+N', 'New preset'], ['Ctrl+Shift+I', 'Import'], ['Ctrl+Shift+E', 'Export'],
       ['M (Library)', 'Map of geotagged photos'],
@@ -1246,7 +1246,7 @@
       ['Space', 'Video: play / pause'], [', / .', 'Video: previous / next frame (Shift = 10)'], ['Shift+I / Shift+O', 'Video: set in / out point'], ['Ctrl+Shift+F', 'Video: capture frame'] 
     ];
     const grid = h('div', { class: 'kbd-table' });
-    rows.forEach(([k, d]) => grid.append(h('span', null, ...k.split(' / ').flatMap((x, i) => i ? [' / ', h('kbd', null, x)] : [h('kbd', null, x)])), h('span', { class: 'muted' }, d)));
+    rows.forEach(([k, d]) => grid.append(h('span', null, ...k.split(' / ').map(UI.keys).flatMap((x, i) => i ? [' / ', h('kbd', null, x)] : [h('kbd', null, x)])), h('span', { class: 'muted' }, d)));
     UI.modal({ title: 'Keyboard Shortcuts', icon: 'keyboard', wide: true, body: grid });
   }
   function about() {
@@ -1306,7 +1306,7 @@
     rawSel.value = Cat.pref('raw.engine', 'full');
     rawSel.addEventListener('change', () => { Cat.setPref('raw.engine', rawSel.value); UI.toast('Applies to RAW files opened from now on', 'circle-info'); });
     UI.modal({
-      title: 'Preferences', icon: 'gear', wide: true,
+      title: UI.settingsName, icon: 'gear', wide: true,
       body: h('div', { class: 'prefs' },
         h('h4', null, 'Performance'),
         row('GPU previews', gpu.off ? 'Not available on this computer (no hardware WebGL2)' : 'Sliders render on the graphics card while you drag; the final image is always rendered exactly.', chk('gpu.preview', true)),
@@ -1325,7 +1325,8 @@
         h('h4', null, 'Import'),
         row('Apply lens profiles on import', 'New photos get the distortion and vignetting correction for their lens from the lens database.', chk('lens.autoProfile', false)),
         row('Apply noise reduction by ISO on import', 'New photos taken at ISO 400 and above start with luminance and colour noise reduction to match.', chk('nr.autoIso', false)),
-        row('Offer to import camera cards', 'Asks when a card or camera with photos is connected (Windows app).', chk('import.detectCards', true)),
+        // only the Windows app watches for cards and cameras being connected
+        ...(API.platform === 'windows' ? [row('Offer to import camera cards', 'Asks when a card or camera with photos is connected.', chk('import.detectCards', true))] : []),
         h('h4', null, 'Lightroom compatibility'),
         row('Read .xmp sidecars on import', 'Picks up Lightroom / Camera Raw edits, ratings, labels and keywords.', chk('xmp.readOnImport', true)),
         row('Automatically write .xmp sidecars', 'Keeps a sidecar next to each original up to date as you edit.', chk('xmp.autoWrite', false)),
@@ -1424,7 +1425,8 @@
     if (kl === 'j') return develop.toggleClip('both');
     if (kl === 'i') return viewer.cycleInfo();
     if (kl === 'z') return viewer.setZoom(viewer.st.zoom === 'fit' ? 1 : 'fit');
-    if (kl === 'y') {
+    // (with Alt, by key position: on a Mac, Option+Y types "¥")
+    if (kl === 'y' || (e.altKey && e.code === 'KeyY')) {
       const mode = e.shiftKey ? 'split' : e.altKey ? 'topbottom' : 'side';
       return viewer.setCompare(viewer.st.compare === mode ? 'single' : mode);
     }
