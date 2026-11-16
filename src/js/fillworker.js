@@ -21,6 +21,11 @@
  * out: { id, rgb: Uint8Array(w·h·3) } or { id, error }
  * ===================================================================== */
 'use strict';
+// What material of the wrong kind costs. Where the border between two kinds could be carried through the
+// hole, the map of what belongs where is trusted and the cost is beyond any texture's own mismatch —
+// otherwise smooth things (sky) fill everything, being a cheap match for anything. Where the map is only
+// a guess (each place takes the nearest kind), it is a strong hint and the picture itself decides.
+const SURE = 6000, HINT = 400;
 const HALF = 3;                     // squares are (2·HALF+1)² pixels
 
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -41,34 +46,121 @@ function half(l) {
   }
   const out = { w, h, img, hole };
   if (l.lab) { out.lab = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.lab[y * w + x] = l.lab[Math.min(l.h - 1, y * 2) * l.w + Math.min(l.w - 1, x * 2)]; }
+  if (l.bd) { out.bd = new Float32Array(w * h); out.near = l.near; out.scale = l.scale * 2; out.pen = l.pen; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.bd[y * w + x] = l.bd[Math.min(l.h - 1, y * 2) * l.w + Math.min(l.w - 1, x * 2)]; }
+  if (l.kind) { out.kind = new Uint8Array(w * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out.kind[y * w + x] = l.kind[Math.min(l.h - 1, y * 2) * l.w + Math.min(l.w - 1, x * 2)]; }
   return out;
 }
 
-/** What kind of thing each pixel should be: its own kind outside the hole, inside it the kind of the nearest pixel outside. */
+/**
+ * What kind of thing each pixel should be: its own kind outside the hole; inside it, what the surroundings
+ * say belongs there. Where two kinds meet at the hole's edge in exactly two places (a wall against the sky
+ * behind a sign, a horizon behind a person), the border between them is carried on through the hole the way
+ * it runs outside — straight on from each side, meeting in a corner if the two directions cross inside the
+ * hole, otherwise straight across. In every other case each place takes the kind nearest to it.
+ */
 function kinds(l) {
-  const { w, h, hole, lab } = l, g = Uint8Array.from(lab), seen = new Uint8Array(w * h);
+  const { w, h, lab } = l, n = w * h, g = Uint8Array.from(lab), seen = new Uint8Array(n), painted = l.hole;
   // A kind of thing with little of it outside the hole cannot fill anything: what is left of the object
   // being removed, a sliver of something at the edge. Such kinds do not spread into the hole (255 = any
   // material will do), or the fill would be tiled from a few pixels.
   const count = new Uint32Array(256); let outside = 0;
-  for (let i = 0; i < w * h; i++) if (!hole[i]) { count[lab[i]]++; outside++; }
+  for (let i = 0; i < n; i++) if (!painted[i]) { count[lab[i]]++; outside++; }
   const enough = Math.max(40, outside * 0.04);
-  let q = [];
-  for (let i = 0; i < w * h; i++) {
+  const hole = painted;
+  // the ring: pixels outside the hole that touch it
+  const ring = [], onRing = new Uint8Array(n), rl = new Uint8Array(n).fill(255);
+  for (let i = 0; i < n; i++) {
     if (hole[i]) { g[i] = 255; continue; }
     seen[i] = 1;
-    if (count[lab[i]] < enough) { g[i] = 255; continue; }
     const x = i % w, y = (i / w) | 0;
-    if ((x > 0 && hole[i - 1]) || (x < w - 1 && hole[i + 1]) || (y > 0 && hole[i - w]) || (y < h - 1 && hole[i + w])) q.push(i);
+    if ((x > 0 && hole[i - 1]) || (x < w - 1 && hole[i + 1]) || (y > 0 && hole[i - w]) || (y < h - 1 && hole[i + w])) { ring.push(i); onRing[i] = 1; if (count[lab[i]] >= enough) rl[i] = lab[i]; }
+    if (count[lab[i]] < enough) g[i] = 255;
   }
+  const around = (i, fn) => { const x = i % w, y = (i / w) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < w && yy < h) fn(yy * w + xx); } };
+  // stretches of the ring whose own kind does not count (the object's remains) take the kind next to them along the ring
+  { let q = ring.filter(i => rl[i] !== 255); while (q.length) { const next = []; for (const i of q) around(i, (j) => { if (onRing[j] && rl[j] === 255) { rl[j] = rl[i]; next.push(j); } }); q = next; } }
+
+  // ---- two kinds meeting in two places: carry their border through the hole ----
+  const wall = new Uint8Array(n);
+  const present = [...new Set(ring.map(i => rl[i]).filter(v => v !== 255))];
+  if (present.length === 2) {
+    const A = present[0], B = present[1];
+    // where the ring changes from one kind to the other, gathered into places
+    const changes = ring.filter(i => { if (rl[i] !== A) return false; let hit = false; around(i, (j) => { if (onRing[j] && rl[j] === B) hit = true; }); return hit; });
+    const places = [];
+    for (const i of changes) { const x = i % w, y = (i / w) | 0; let p = places.find(q => Math.hypot(q.x / q.n - x, q.y / q.n - y) < 10); if (!p) { p = { x: 0, y: 0, n: 0 }; places.push(p); } p.x += x; p.y += y; p.n++; }
+    if (places.length === 2) {
+      const P = places.map(p => [p.x / p.n, p.y / p.n]);
+      // which way the border runs just outside the hole at each place (a line fitted to the border there)
+      const reach = Math.max(24, Math.max(w, h) * 0.12);
+      const dir = P.map(([px, py]) => {
+        let sx = 0, sy = 0, m = 0; const pts = [];
+        const x0 = Math.max(1, Math.floor(px - reach)), x1 = Math.min(w - 2, Math.ceil(px + reach)), y0 = Math.max(1, Math.floor(py - reach)), y1 = Math.min(h - 2, Math.ceil(py + reach));
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+          const i = y * w + x;
+          if (hole[i] || lab[i] !== A || Math.hypot(x - px, y - py) > reach) continue;
+          if ((!hole[i - 1] && lab[i - 1] === B) || (!hole[i + 1] && lab[i + 1] === B) || (!hole[i - w] && lab[i - w] === B) || (!hole[i + w] && lab[i + w] === B)) { pts.push(x, y); sx += x; sy += y; m++; }
+        }
+        if (m < 12) return null;
+        const cx = sx / m, cy = sy / m; let a = 0, b = 0, c = 0;
+        for (let k = 0; k < pts.length; k += 2) { const dx = pts[k] - cx, dy = pts[k + 1] - cy; a += dx * dx; b += dx * dy; c += dy * dy; }
+        const tr = a + c, det = a * c - b * b, s = Math.sqrt(Math.max(0, tr * tr / 4 - det)), l1 = tr / 2 + s, l2 = tr / 2 - s;
+        if (l1 < 6 * Math.max(1e-6, l2)) return null;                       // not a line
+        let dx = b, dy = l1 - a; if (Math.abs(dx) + Math.abs(dy) < 1e-9) { dx = l1 - c; dy = b; }
+        const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+        if ((px - cx) * dx + (py - cy) * dy < 0) { dx = -dx; dy = -dy; }     // pointing from outside into the hole
+        return [dx, dy];
+      });
+      // the border inside the hole: both directions carried on to where they meet, or straight across
+      let path = [P[0], P[1]];
+      if (dir[0] && dir[1]) {
+        const [ax, ay] = P[0], [bx, by] = P[1], [ux, uy] = dir[0], [vx, vy] = dir[1], cross = ux * vy - uy * vx;
+        if (Math.abs(cross) > 0.25) {
+          const t = ((bx - ax) * vy - (by - ay) * vx) / cross, s = ((bx - ax) * uy - (by - ay) * ux) / cross;
+          const cx = ax + ux * t, cy = ay + uy * t, ix = Math.round(cx), iy = Math.round(cy);
+          if (t > 2 && s > 2 && ix >= 0 && iy >= 0 && ix < w && iy < h && hole[iy * w + ix]) path = [P[0], [cx, cy], P[1]];
+        }
+      }
+      // drawn three pixels thick and a little past both ends, so nothing slips round where it meets the hole's edge
+      for (let k = 1; k < path.length; k++) {
+        const [ax, ay] = path[k - 1], [bx, by] = path[k], len = Math.hypot(bx - ax, by - ay) || 1, steps = Math.ceil(len * 2) + 1;
+        const q0 = k === 1 ? -Math.ceil(12 / len * steps) : 0, q1 = k === path.length - 1 ? steps + Math.ceil(12 / len * steps) : steps;
+        for (let q = q0; q <= q1; q++) {
+          const x = Math.round(ax + (bx - ax) * q / steps), y = Math.round(ay + (by - ay) * q / steps);
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < w && yy < h && hole[yy * w + xx]) wall[yy * w + xx] = 1; }
+        }
+      }
+      l.border = path; l.pen = SURE;
+    }
+  }
+  // every place in the hole takes the kind that reaches it first from the ring (not across a carried border)
+  let q = ring.filter(i => rl[i] !== 255);
+  const from = new Uint8Array(n).fill(255);
+  for (const i of q) from[i] = rl[i];
   while (q.length) {
     const next = [];
     for (const i of q) {
       const x = i % w, y = (i / w) | 0;
-      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !seen[j]) { seen[j] = 1; g[j] = g[i]; next.push(j); }
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !seen[j] && !wall[j]) { seen[j] = 1; from[j] = from[i]; g[j] = from[i]; next.push(j); }
     }
     q = next;
   }
+  // the border itself, and anything it closed off, takes what lies next to it
+  for (let pass = 0; pass < 4; pass++) {
+    let left = 0;
+    for (let i = 0; i < n; i++) if (hole[i] && !seen[i]) { let v = 255; around(i, (j) => { if (v === 255 && hole[j] && seen[j] && g[j] !== 255) v = g[j]; }); if (v !== 255) { g[i] = v; seen[i] = 2; } else left++; }
+    for (let i = 0; i < n; i++) if (seen[i] === 2) seen[i] = 1;
+    if (!left) break;
+  }
+  // The scene map is coarse: close to where two kinds meet, a pixel's kind may be its neighbour's. Such
+  // places are fine as material for the hole's own borders, but not for its open stretches — or a
+  // white wall cap that the map calls sky ends up in the middle of the sky.
+  const near = Math.max(6, Math.round(Math.max(w, h) * 0.02)), d = new Float32Array(n).fill(1e9);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if ((x > 0 && g[i - 1] !== g[i]) || (x < w - 1 && g[i + 1] !== g[i]) || (y > 0 && g[i - w] !== g[i]) || (y < h - 1 && g[i + w] !== g[i])) d[i] = 0; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; let v = d[i]; if (x > 0) v = Math.min(v, d[i - 1] + 1); if (y > 0) v = Math.min(v, d[i - w] + 1); d[i] = v; }
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) { const i = y * w + x; let v = d[i]; if (x < w - 1) v = Math.min(v, d[i + 1] + 1); if (y < h - 1) v = Math.min(v, d[i + w] + 1); d[i] = v; }
+  if (!l.pen) l.pen = HINT;
+  l.bd = d; l.near = near; l.scale = 1;          // distance to the nearest border between kinds, in pixels of this (full) size
   return g;
 }
 
@@ -160,7 +252,7 @@ function differ(l, t, s, best, conf) {
     if (sum >= best * 49) return sum / 49 + 1e-3;            // already worse than the best, whatever the rest adds
   }
   // material of another kind than this place calls for is a poor match however alike it looks
-  return sum / (wsum + 1e-6) * (1 + 0.6 * far) + (l.kind && l.kind[t] !== 255 && l.lab[s] !== l.kind[t] ? 400 : 0);
+  return sum / (wsum + 1e-6) * (1 + 0.6 * far) + (l.kind && l.kind[t] !== 255 ? (l.lab[s] !== l.kind[t] ? l.pen : l.pen === SURE && l.bd[s] <= l.near && l.bd[t] > (HALF + 2) * l.scale ? SURE * 0.5 : 0) : 0);
 }
 
 /** One round of search: good matches spread to neighbours, and each target tries random places near its match. */
@@ -222,6 +314,7 @@ function inpaint(w, h, rgb, mask, label) {
   for (let i = 0; i < w * h; i++) { if (top.hole[i]) any = true; else all = false; }
   if (!any) return rgb;
   if (all) throw new Error('nothing around the area to fill it from');
+  if (top.lab) top.kind = kinds(top);          // what belongs where in the hole, worked out once at full size
   const levels = [top];
   while (levels.length < 7 && Math.min(levels[levels.length - 1].w, levels[levels.length - 1].h) > 40) levels.push(half(levels[levels.length - 1]));
   const rand = rng(w * 7919 + h);
@@ -287,4 +380,4 @@ if (typeof self !== 'undefined' && typeof self.postMessage === 'function' && typ
     catch (e) { self.postMessage({ id: m.id, error: String(e && e.message || e) }); }
   };
 }
-if (typeof module !== 'undefined') module.exports = { inpaint };
+if (typeof module !== 'undefined') module.exports = { inpaint, kinds };

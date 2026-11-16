@@ -1,5 +1,10 @@
 # Changes
 
+## Unreleased
+
+**Better**
+- Content-aware fill: removing something that hung across the line between two materials (a sign in front of a roofline and the sky) now keeps wall and sky apart along one clean line, instead of letting the sky eat into the wall
+
 ## 2.2.0
 
 **New**

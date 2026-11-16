@@ -499,6 +499,34 @@ test('fill takes each part of a hole from material of its own kind', async () =>
   return `${(r.wrong * 100).toFixed(1)}% of the filled area took material from the wrong side`;
 });
 
+test('fill carries the border between two kinds straight through where an object hid it', async () => {
+  const r = await page(async () => {
+    // smooth pale sky above a sloping roofline, rough brown wall below; a sign (a kind found nowhere else) hangs across the line
+    const w = 240, h = 180, rgb = new Uint8Array(w * h * 3), mask = new Uint8Array(w * h), label = new Uint8Array(w * h);
+    let s = 3; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const wall = (x, y) => y > 30 + x * 0.45;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x, n = rnd();
+      if (wall(x, y)) { const m = (y % 8 < 1 || (x + ((y / 8) | 0) * 9) % 18 < 1) ? 60 : 0; rgb.set([150 - m + n * 50, 100 - m + n * 40, 70 - m + n * 30], i * 3); label[i] = 1; } else { rgb.set([205 + n * 6, 208 + n * 6, 214 + n * 6], i * 3); label[i] = 2; }
+      if (x >= 85 && x < 155 && y >= 45 && y < 125) { rgb.set([250, 240, 60], i * 3); label[i] = 9; }
+      if (x >= 75 && x < 165 && y >= 35 && y < 135) mask[i] = 1;
+    }
+    const wk = new Worker(new URL('js/fillworker.js', location.href).href);
+    const out = await new Promise((res, rej) => { wk.onmessage = (e) => e.data.error ? rej(new Error(e.data.error)) : res(e.data.rgb); wk.postMessage({ id: 1, w, h, rgb, mask, label }); });
+    wk.terminate();
+    let wrong = 0, n = 0, yellow = 0;
+    for (let y = 38; y < 132; y++) for (let x = 78; x < 162; x++) {
+      const d = (y - 30 - x * 0.45) / Math.hypot(1, 0.45); if (Math.abs(d) < 4) continue;          // a few pixels either side of the line are free
+      let a = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const q = ((y + dy) * w + x + dx) * 3; a += out[q + 2] - out[q] ; } a /= 9;      // sky is bluish, wall reddish
+      n++; if ((a < -20) !== wall(x, y)) wrong++;
+      const i = (y * w + x) * 3; if (out[i] > 230 && out[i + 2] < 120) yellow++;
+    }
+    return { wrong: wrong / n, yellow };
+  });
+  assert(r.yellow === 0 && r.wrong < 0.05, 'sky and wall must each keep to their side of the carried line: ' + JSON.stringify(r));
+  return `${(r.wrong * 100).toFixed(1)}% of the filled area on the wrong side of the line`;
+});
+
 test('fisheye correction: same on both renderers, points map there and back; Adobe RGB soft proof', async () => {
   const r = await page(async () => {
     const P = PJ.Pipeline, E = PJ.Engine, Cat = PJ.Catalog, p = Cat.state.photos.find(x => x.name === 'building.jpg');
