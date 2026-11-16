@@ -1361,7 +1361,7 @@
       },
       startMask(type) { st.maskCreate = type; if (st.tool !== 'mask') api.setTool('mask'); setCursor(); events.emit('masks'); },
       selectMask(i) { st.maskIdx = i; update('commit'); events.emit('masks'); },
-      setMaskOverlay(b) { st.maskOverlay = b; update('commit'); },
+      setMaskOverlay(b) { st.maskOverlay = b; update('commit'); events.emit('masks'); },   // the pane's checkbox follows the O key
       /** The next click on the photo hands its hue (0…360) to cb. */
       pickColor(cb) { st.colorPick = cb; root.classList.add('cur-picker'); PJ.UI.toast('Click the colour in the photo', 'eye-dropper'); },
       activeMask,

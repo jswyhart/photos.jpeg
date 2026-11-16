@@ -1024,6 +1024,12 @@
         h('div', { class: 'curve-hint' }, st.spotMode === 'fill' ? 'Fill: paint over what should go — a person, a sign, a wire. The area is rebuilt from what is around it. Delete removes the selected fill.' : 'Click a blemish to heal it — a matching source is picked automatically. Drag circles to adjust · Alt-drag moves only the target · Delete removes the selected spot.'));
     }
     let aiBusy = false;
+    /** The Subject / Sky / People / Background / Person buttons follow aiBusy. The ones on screen are looked up,
+        not remembered: adding the finished mask rebuilds the pane, so the button that was clicked is gone by then. */
+    function setAiBusy(on) {
+      aiBusy = on;
+      toolPane.querySelectorAll('button.ai-add').forEach(b => { b.disabled = on || !photo || photo.kind === 'video'; });
+    }
     function buildMaskPane() {
       const st = viewer.st;
       const masks = photo ? photo.settings.masks : [];
@@ -1031,17 +1037,17 @@
       // Subject / Sky / People: found by a small neural network on this computer, then an ordinary brush mask
       const addAi = (kind, ic, label) => {
         const b = h('button', {
-          class: 'btn sm', title: `Mask the ${label.toLowerCase()} automatically — then adjust it like any mask, or touch it up with the brush`,
+          class: 'btn sm ai-add', title: `Mask the ${label.toLowerCase()} automatically — then adjust it like any mask, or touch it up with the brush`,
           onclick: async () => {
             const p = photo;
             if (!p || aiBusy) return;
-            aiBusy = true; b.disabled = true;
+            setAiBusy(true);
             UI.activity(PJ.AIMask.KINDS[kind].busy, null);
             try {
               const fields = await PJ.AIMask.create(p, kind);
               if (p === photo) viewer.addMask(fields);
             } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
-            finally { aiBusy = false; UI.activity(''); if (b.isConnected) b.disabled = false; }
+            finally { setAiBusy(false); UI.activity(''); }
           }
         }, icon(ic), label);
         b.disabled = aiBusy || !photo || photo.kind === 'video';
@@ -1050,11 +1056,11 @@
       // one person among several: chosen by face
       const personBtn = () => {
         const b = h('button', {
-          class: 'btn sm', title: 'Mask one person: choose whose face',
+          class: 'btn sm ai-add', title: 'Mask one person: choose whose face',
           onclick: async () => {
             const p = photo;
             if (!p || aiBusy) return;
-            aiBusy = true; b.disabled = true;
+            setAiBusy(true);
             const make = async (sel, name) => {
               UI.activity(PJ.AIMask.KINDS.person.busy, null);
               try { const fields = await PJ.AIMask.create(p, sel ? 'person' : 'people', sel, name); if (p === photo) viewer.addMask(fields); }
@@ -1075,7 +1081,7 @@
                 })));
               }
             } catch (e) { UI.toast(String(e.message || e), 'triangle-exclamation'); }
-            finally { aiBusy = false; UI.activity(''); if (b.isConnected) b.disabled = false; }
+            finally { setAiBusy(false); UI.activity(''); }
           }
         }, icon('user'), 'Person…');
         b.disabled = aiBusy || !photo || photo.kind === 'video';
