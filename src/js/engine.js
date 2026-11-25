@@ -833,8 +833,62 @@
     }
   }
 
+  /**
+   * The whole photo at full size, drawn on the GPU and read back: what an export renders, in a fraction of the
+   * time. The "exact" mode of the renderer does noise reduction and sharpening the way the CPU engine does, so
+   * the file is the same picture to within a level or two. Resolves to the same shape as render(), or null when
+   * the CPU has to do it: 16-bit output, a wide-colour photo going to an sRGB file, a photo larger than the card
+   * takes, or a card that failed at it (it is then left alone for the rest of the session).
+   */
+  async function renderGPUFull(photo, settings, opts) {
+    opts = opts || {};
+    if (!photo || photo.kind === 'video' || opts.out16 || opts.region || opts.gamutCube || opts.gamutWarn || opts.cropOverride || !gpuFullReady()) return null;
+    if (PJ.Catalog.pref('gpu.export', true) === false) return null;
+    if (PJ.AIMask && settings && settings.masks && !PJ.AIMask.ready(settings)) await PJ.AIMask.ensure(photo, settings);
+    if (PJ.Fill && settings && settings.spots && !PJ.Fill.ready(settings)) await PJ.Fill.ensure(photo, settings);
+    const src = await ensureFull(photo);
+    if (!gpuFullReady()) return null;
+    const lv = src.full;
+    if (!lv || Math.max(lv.width, lv.height) > gpuF.maxTex || lv.width * lv.height > 80e6) return null;
+    const s = P.normalizeSettings(settings);
+    const o = Object.assign({}, opts, { levelScale: 1, fullLong: Math.max(src.fullW, src.fullH), seed: seedFor(photo), target: 'pixels', exact: true });
+    if (src.input) { o.srcInput = src.input; o.wide = !!photo.wide; }
+    if (s.lut.id && PJ.LUTs) { o.cube = await PJ.LUTs.get(s.lut.id); if (!o.cube) return null; }
+    const wide = P.isWide(s, o);
+    // the pixels come back in the colours the edit was made in: Display P3 for a wide-colour photo, sRGB otherwise
+    if (wide && (opts.outSpace !== 'p3' || (o.cube && s.lut.amount > 0))) return null;
+    const g = P.buildGeometry(s, lv.width, lv.height);
+    if (Math.max(g.outW, g.outH) > gpuF.maxTex) return null;
+    try {
+      const t0 = performance.now();
+      const spots = s.spots && s.spots.length ? s.spots : null;
+      const sig = src.key + '|full|' + lv.width + 'x' + lv.height + '|' + (spots ? JSON.stringify(spots) : '');
+      if (sig !== gpuFSig || gpuF.srcLevel !== lv) {
+        const data = spots ? P.applySpots(lv.data, lv.width, lv.height, spots) : lv.data;
+        gpuF.setPixels(data, lv.width, lv.height);
+        gpuF.srcLevel = lv; gpuFSig = sig;
+      }
+      gpuF.srcW = lv.width; gpuF.srcH = lv.height;
+      const r = gpuF.render(s, o), gl = gpuF.gl, err = gl.getError();
+      if (err !== gl.NO_ERROR) throw new Error('graphics error ' + err + (err === gl.OUT_OF_MEMORY ? ' (out of memory)' : ''));
+      if (!r.data || r.width !== g.outW || r.height !== g.outH) throw new Error('unexpected result');
+      // a card that ran out of memory without saying so hands back an empty picture
+      let any = 0; for (let i = 0; i < r.data.length && !any; i += 4 * 997) any = r.data[i] | r.data[i + 1] | r.data[i + 2];
+      if (!any) { const c = await render(photo, settings, 'draft', {}, 1); let lit = 0; for (let i = 0; i < c.data.length && !lit; i += 4 * 97) lit = c.data[i] | c.data[i + 1] | c.data[i + 2]; if (lit) throw new Error('empty picture'); }
+      return { data: r.data, width: r.width, height: r.height, fullWidth: r.fullWidth, fullHeight: r.fullHeight, region: { x: 0, y: 0, w: r.width, h: r.height }, ms: performance.now() - t0, level: 'full', gpu: true, space: wide ? 'p3' : 'srgb', wide };
+    } catch (e) {
+      console.warn('GPU export render failed; the CPU renders exports from now on:', e && e.message || e);
+      gpuFOff = true;
+      try { if (gpuF) gpuF.release(); } catch (_) { }
+      gpuFSig = '';
+      return null;
+    }
+  }
+
   async function renderFull(photo, settings, onProgress, opts) {
     onProgress && onProgress(0.05);
+    const fast = opts && opts.cpu ? null : await renderGPUFull(photo, settings, opts).catch((e) => { console.warn('GPU export render:', e && e.message || e); return null; });
+    if (fast) { onProgress && onProgress(0.9); return fast; }
     const res = await render(photo, settings, 'full', opts || {}, 1);
     onProgress && onProgress(0.9);
     return res;
@@ -854,6 +908,6 @@
 
   global.PJ.Engine = {
     P3_CANVAS, PROXY_EDGE, DRAFT_EDGE, pool, ensureSource, cachedSource, needsDevelop, prefetch, ensureFull, render, toCanvas,
-    queueThumb, thumbStatus: () => ({ active: thumbActive, queued: thumbQueue.size }), thumbEvents, autoTone, autoGrade, autoWB, sampleAt, renderFull, renderGPU, renderGPUTile, dropGpuFull, gpuReady, dhash, gpuInfo: () => ({ on: !!gpu && !gpuOff, off: gpuOff, full: !!gpuF && !gpuFOff, fullOff: gpuFOff }), dropFull, seedFor, invalidate
+    queueThumb, thumbStatus: () => ({ active: thumbActive, queued: thumbQueue.size }), thumbEvents, autoTone, autoGrade, autoWB, sampleAt, renderFull, renderGPUFull, renderGPU, renderGPUTile, dropGpuFull, gpuReady, dhash, gpuInfo: () => ({ on: !!gpu && !gpuOff, off: gpuOff, full: !!gpuF && !gpuFOff, fullOff: gpuFOff }), dropFull, seedFor, invalidate
   };
 })(window);

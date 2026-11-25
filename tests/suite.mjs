@@ -698,6 +698,40 @@ test('100% view on the GPU: a window of the full-size photo matches the CPU, noi
   return `mean difference ${r.tone.mean} (tone), ${r.noise.mean} (noise reduction), ${r.turned.mean} (rotated) of 255`;
 });
 
+test('export render on the GPU: the same picture as the CPU makes, sharpening and noise reduction included', async () => {
+  const r = await page(async () => {
+    const E = PJ.Engine, P = PJ.Pipeline, p = PJ.Catalog.state.photos.find(x => x.name === 'building.jpg');
+    if (!E.gpuReady() || !E.renderGPUFull) return { skipped: 'no GPU' };
+    const run = async (fn) => {
+      const s = P.defaultSettings(); fn(s);
+      const cpu = await E.renderFull(p, P.clone(s), null, { cpu: true }), g = await E.renderGPUFull(p, P.clone(s), {});
+      if (!g) return { none: JSON.stringify(E.gpuInfo()) };
+      if (g.width !== cpu.width || g.height !== cpu.height) return { size: `${g.width}x${g.height} / ${cpu.width}x${cpu.height}` };
+      let sum = 0, max = 0, n = 0, big = 0; const a = g.data, b = cpu.data;
+      for (let i = 0; i < a.length; i += 4) for (let c = 0; c < 3; c++) { const d = Math.abs(a[i + c] - b[i + c]); sum += d; n++; if (d > max) max = d; if (d > 4) big++; }
+      return { mean: +(sum / n).toFixed(2), max, over4: +(100 * big / n).toFixed(3) };
+    };
+    const out = {
+      colour: await run(s => { s.vibrance = 30; s.exposure = 0.3; s.saturation = 10; s.grading.midtones.h = 30; s.grading.midtones.s = 20; }),
+      sharpen: await run(s => { s.detail.sharpen = 70; s.detail.radius = 1.6; s.detail.masking = 30; }),
+      noise: await run(s => { s.detail.nrLuma = 40; s.detail.nrColor = 40; }),
+      all: await run(s => { s.exposure = 0.3; s.contrast = 15; s.highlights = -40; s.shadows = 30; s.vibrance = 20; s.texture = 20; s.clarity = 15; s.detail.sharpen = 50; s.detail.nrLuma = 30; s.detail.nrColor = 25; s.geo.rotate = 2; }),
+    };
+    // the half-float packing behind the colour table: a value just under a power of two must round up to it, not to half of it
+    const fast = await E.renderFull(p, P.defaultSettings(), null, {});
+    E.dropFull();
+    return Object.assign(out, { usedGpu: !!fast.gpu, info: E.gpuInfo() });
+  });
+  if (r.skipped) return 'skipped: ' + r.skipped;
+  for (const k of ['colour', 'sharpen', 'noise', 'all']) {
+    assert(!r[k].none && !r[k].size, `${k}: no GPU render of the right size: ` + JSON.stringify(r[k]));
+    assert(r[k].mean < 0.6 && r[k].max <= 16 && r[k].over4 < 0.3, `${k}: GPU and CPU differ: ` + JSON.stringify(r[k]));
+  }
+  assert(r.colour.max <= 4, 'colour edits must agree closely (a rounding slip in the colour table once put green far off on a few colours): ' + JSON.stringify(r.colour));
+  assert(r.usedGpu && r.info.full, 'a full-size render did not go to the GPU: ' + JSON.stringify(r.info));
+  return `mean difference ${r.colour.mean} / ${r.sharpen.mean} / ${r.noise.mean} / ${r.all.mean} of 255 (colour / sharpening / noise reduction / everything)`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

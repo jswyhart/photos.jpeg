@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Faster**
+- Exports render on the graphics card: about 20 times faster for the render itself (a fully edited 50-megapixel photo in 0.2 s instead of 4 s on a fast card). The file is the same picture to within a fraction of a level; 16-bit TIFFs and PCs without a suitable card render on the CPU as before
+
+**Fixed**
+- GPU preview: a few colours whose value landed just under mid-grey came out wrong (green or another channel far too dark) until the exact render replaced them — a rounding slip in how the colour table was packed for the graphics card
+
 **Better**
 - Develop at 100%: the sharp full-size view now follows every slider movement and pan at once (drawn on the graphics card), instead of appearing after a pause
 - Noise reduction looks the same while dragging as after: the GPU preview uses the same method as the final render

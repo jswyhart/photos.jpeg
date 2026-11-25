@@ -285,11 +285,91 @@
     frag = acc / wsum;
   }`;
 
+  /* ---------------- the exact render (exports): colour noise reduction and sharpening as pipeline.js does them ----------------
+   * The live preview folds both into pass 2, from a 5×5 neighbourhood of pass 1. That is close, but not what the
+   * CPU does: it blurs the colour differences before white balance and exposure, and sharpens the finished
+   * picture. For a render that is kept, these two programs do the same, in the same places. */
+  // colour noise reduction on stage 1's picture (with the wavelet result, when luminance noise reduction ran):
+  // uMode 0: the colour differences (B−Y, R−Y) blurred along x → rg. uMode 1: that blurred along y, then mixed in.
+  const CHROMA = `#version 300 es
+  precision highp float; precision highp int;
+  uniform sampler2D uPre, uNr, uT; uniform bool uHasNr; uniform int uMode; uniform float uSigma, uAmt;
+  out vec4 frag;
+  vec4 at(ivec2 p, ivec2 size){            // rgb after luminance noise reduction, its brightness in a
+    p = clamp(p, ivec2(0), size - 1);
+    vec4 pre = texelFetch(uPre, p, 0);
+    if (!uHasNr) return pre;
+    vec2 nr = texelFetch(uNr, p, 0).rg; float yd = nr.r + nr.g;
+    return vec4(pre.rgb + (yd - pre.a), yd);
+  }
+  void main(){
+    ivec2 p = ivec2(gl_FragCoord.xy), size = textureSize(uPre, 0);
+    int r = int(ceil(uSigma * 3.0));
+    vec2 acc = vec2(0.0); float wsum = 0.0;
+    for (int i = -48; i <= 48; i++) {
+      if (i < -r || i > r) continue;
+      float w = exp(-0.5 * float(i * i) / (uSigma * uSigma));
+      if (uMode == 0) { vec4 q = at(p + ivec2(i, 0), size); acc += vec2(q.b - q.a, q.r - q.a) * w; }
+      else acc += texelFetch(uT, clamp(p + ivec2(0, i), ivec2(0), size - 1), 0).rg * w;
+      wsum += w;
+    }
+    acc /= wsum;
+    if (uMode == 0) { frag = vec4(acc, 0.0, 1.0); return; }
+    vec4 c = at(p, size); float y = c.a;
+    float cb = mix(c.b - y, acc.x, uAmt), cr = mix(c.r - y, acc.y, uAmt);
+    float R = y + cr, B = y + cb;
+    frag = vec4(R, (y - 0.2126 * R - 0.0722 * B) / 0.7152, B, 0.0);      // a = 0: stage 2 adds nothing more to it
+  }`;
+  // one box of the three the CPU engine's blur is made of (blurPlane in pipeline.js): the mean over 2·uR + 1
+  // pixels along uDir, the picture's edge pixel standing in for what lies beyond it
+  const BOX = `#version 300 es
+  precision highp float; precision highp int;
+  uniform sampler2D uTex; uniform int uR; uniform ivec2 uDir; uniform bool uLuma;
+  out vec4 frag;
+  void main(){
+    ivec2 p = ivec2(gl_FragCoord.xy), size = textureSize(uTex, 0);
+    float acc = 0.0;
+    for (int i = -64; i <= 64; i++) {
+      if (i < -uR || i > uR) continue;
+      vec4 c = texelFetch(uTex, clamp(p + uDir * i, ivec2(0), size - 1), 0);
+      acc += uLuma ? dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)) : c.r;
+    }
+    frag = vec4(acc / float(2 * uR + 1));
+  }`;
+  // sharpening of the finished picture: unsharp mask on its brightness, limited, and masked to edges
+  const POST = `#version 300 es
+  precision highp float; precision highp int;
+  uniform sampler2D uImg, uYb, uYm; uniform float uAmt, uLim, uMask; uniform bool uHasYm;
+  out vec4 frag;
+  float sstep(float a, float b, float x){ float t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+  void main(){
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    vec3 c = texelFetch(uImg, p, 0).rgb; float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float d = clamp(Y - texelFetch(uYb, p, 0).r, -uLim, uLim), m = 1.0;
+    if (uHasYm) m = sstep(uMask * 0.012, uMask * 0.05 + 0.002, abs(Y - texelFetch(uYm, p, 0).r));
+    frag = vec4(clamp(c + d * uAmt * m, 0.0, 1.0), 1.0);
+  }`;
+
   /* ---------------- pass 2 ---------------- */
   const PASS2 = COMMON + `
   uniform sampler2D uP1, uYl, uYt, uDC;
   uniform bool uMaskColor; uniform vec3 uUngain;
-  uniform sampler3D uLut;
+  uniform sampler3D uLut; uniform float uLutN; uniform bool uLutTetra;
+  // the colour table read the way the CPU engine reads its own (tetrahedral, between the four nearest entries):
+  // for the exact render, which also uses the CPU's table size
+  vec3 lutTetra(vec3 c){
+    float m = uLutN - 1.0; vec3 p = clamp(c, 0.0, 1.0) * m;
+    ivec3 i = ivec3(min(floor(p), vec3(m - 1.0))); vec3 f = p - vec3(i);
+    vec3 c000 = texelFetch(uLut, i, 0).rgb, c111 = texelFetch(uLut, i + ivec3(1), 0).rgb;
+    if (f.r >= f.g) {
+      if (f.g >= f.b) { vec3 a = texelFetch(uLut, i + ivec3(1, 0, 0), 0).rgb, b = texelFetch(uLut, i + ivec3(1, 1, 0), 0).rgb; return c000 + f.r * (a - c000) + f.g * (b - a) + f.b * (c111 - b); }
+      if (f.r >= f.b) { vec3 a = texelFetch(uLut, i + ivec3(1, 0, 0), 0).rgb, b = texelFetch(uLut, i + ivec3(1, 0, 1), 0).rgb; return c000 + f.r * (a - c000) + f.b * (b - a) + f.g * (c111 - b); }
+      vec3 a = texelFetch(uLut, i + ivec3(0, 0, 1), 0).rgb, b = texelFetch(uLut, i + ivec3(1, 0, 1), 0).rgb; return c000 + f.b * (a - c000) + f.r * (b - a) + f.g * (c111 - b);
+    }
+    if (f.b >= f.g) { vec3 a = texelFetch(uLut, i + ivec3(0, 0, 1), 0).rgb, b = texelFetch(uLut, i + ivec3(0, 1, 1), 0).rgb; return c000 + f.b * (a - c000) + f.g * (b - a) + f.r * (c111 - b); }
+    if (f.b >= f.r) { vec3 a = texelFetch(uLut, i + ivec3(0, 1, 0), 0).rgb, b = texelFetch(uLut, i + ivec3(0, 1, 1), 0).rgb; return c000 + f.g * (a - c000) + f.b * (b - a) + f.r * (c111 - b); }
+    vec3 a = texelFetch(uLut, i + ivec3(0, 1, 0), 0).rgb, b = texelFetch(uLut, i + ivec3(1, 1, 0), 0).rgb; return c000 + f.g * (a - c000) + f.r * (b - a) + f.b * (c111 - b);
+  }
   uniform float uContrast, uHigh, uShad, uWhite, uBlack, uTex, uClar, uDeh;
   uniform bool uHasYl, uHasYt, uHasDC, uLocalTone, uLocalSat, uUseLut;
   uniform bool uCubeLook; uniform highp sampler3D uCube; uniform float uCubeAmt, uCubeN;   // imported creative .cube
@@ -413,7 +493,7 @@
 
     // ---- color stage (3D LUT from the CPU engine)
     c = clamp(c, 0.0, 1.0);
-    if (uUseLut) c = texture(uLut, c * (${LUT_N - 1}.0/${LUT_N}.0) + 0.5/${LUT_N}.0).rgb;
+    if (uUseLut) c = uLutTetra ? lutTetra(c) : texture(uLut, c * ((uLutN - 1.0)/uLutN) + 0.5/uLutN).rgb;
     if (cSat != 0.0) { float Yv = luma(c); c = Yv + (c - Yv) * max(0.0, 1.0 + cSat/100.0); }
     if (uCubeLook) { vec3 cc = clamp(c, 0.0, 1.0); c = mix(c, texture(uCube, cc * ((uCubeN - 1.0)/uCubeN) + 0.5/uCubeN).rgb, uCubeAmt); }
 
@@ -468,7 +548,9 @@
     let e = ((x >> 23) & 0xff) - 112, m = x & 0x7fffff;
     if (e <= 0) { if (e < -10) return sign; m = (m | 0x800000) >> (1 - e); return sign | ((m + 0x1000) >> 13); }
     if (e >= 31) return sign | 0x7c00;
-    return sign | (e << 10) | ((m + 0x1000) >> 13);
+    // added, not or-ed: a mantissa that rounds up to the next power of two has to carry into the exponent
+    // (or-ed, a value just under 0.5 or 0.125 came out as half of itself)
+    return sign + (e << 10) + ((m + 0x1000) >> 13);
   }
   function halfArray(a) { const o = new Uint16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = toHalf(a[i]); return o; }
 
@@ -488,7 +570,7 @@
       this.floatOk = !!gl.getExtension('EXT_color_buffer_float');
       gl.getExtension('OES_texture_float_linear');
       this.p1 = this.program(PASS1); this.p2 = this.program(PASS2);
-      this.pr = this.program(REDUCE); this.pb = this.program(BLUR); this.pw = this.program(WAVE);
+      this.pr = this.program(REDUCE); this.pb = this.program(BLUR); this.pw = this.program(WAVE); this.pc = this.program(CHROMA); this.pp = this.program(POST); this.px = this.program(BOX);
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -561,6 +643,61 @@
       this.srcW = 1; this.srcH = 1;
     }
 
+    /** Give back named textures at once (the exact render of a large photo frees each as soon as it is done with it). */
+    dropFbo(...names) {
+      const gl = this.gl;
+      for (const k of names) { const o = this.fbos[k]; if (o) { gl.deleteTexture(o.tex); gl.deleteFramebuffer(o.fb); delete this.fbos[k]; } }
+    }
+    /**
+     * Colour noise reduction as stageNoise() in pipeline.js: the colour differences of stage 1's picture (after
+     * luminance noise reduction, when nr is given) are blurred and mixed in. Returns the texture stage 2 starts from.
+     */
+    chromaNR(pre, nr, w, h, amt, rs) {
+      const gl = this.gl, L = this.pc.locs, sig = Math.max(0.8, 4 * rs * (0.4 + amt));
+      gl.activeTexture(gl.TEXTURE15);
+      const T = this.fbo('cT', w, h, true, false, 2), C = this.fbo('preC', w, h, true);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.useProgram(this.pc.p); gl.viewport(0, 0, w, h);
+      gl.uniform1i(L.uPre, 0); gl.uniform1i(L.uNr, 1); gl.uniform1i(L.uT, 2);
+      gl.uniform1i(L.uHasNr, nr ? 1 : 0); gl.uniform1f(L.uSigma, sig); gl.uniform1f(L.uAmt, amt);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, pre.tex);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, nr || this.dummy);
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.dummy);
+      gl.uniform1i(L.uMode, 0); gl.bindFramebuffer(gl.FRAMEBUFFER, T.fb); this.draw();
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, T.tex);
+      gl.uniform1i(L.uMode, 1); gl.bindFramebuffer(gl.FRAMEBUFFER, C.fb); this.draw();
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.dummy);
+      return C.tex;
+    }
+    /**
+     * The brightness of a picture, blurred into the named one-channel texture — by the same three boxes as
+     * blurPlane() in pipeline.js makes of this sigma, so that sharpening comes out as it does on the CPU.
+     */
+    blurLuma(tex, w, h, sigma, name) {
+      const gl = this.gl, L = this.px.locs, radii = [];
+      if (sigma >= 0.35 && w >= 3 && h >= 3) {
+        const n = 3, wIdeal = Math.sqrt((12 * sigma * sigma / n) + 1);
+        let wl = Math.floor(wIdeal); if (wl % 2 === 0) wl--;
+        const m = Math.round((12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4));
+        for (let i = 0; i < n; i++) { const r = Math.min(64, ((i < m ? wl : wl + 2) - 1) >> 1, Math.floor((Math.min(w, h) - 1) / 2)); if (r >= 1) radii.push(r); }
+      }
+      gl.activeTexture(gl.TEXTURE15);
+      const A = this.fbo('sa', w, h, true, false, 1), B = this.fbo(name, w, h, true, false, 1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.useProgram(this.px.p); gl.viewport(0, 0, w, h); gl.uniform1i(L.uTex, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      // along x then along y for each box; the last draw lands in the named texture
+      const steps = []; for (const r of radii) steps.push([r, 1, 0], [r, 0, 1]);
+      if (!steps.length) steps.push([0, 1, 0]);
+      let src = tex, dst = steps.length % 2 ? B : A;
+      steps.forEach(([r, dx, dy], i) => {
+        gl.uniform1i(L.uLuma, i === 0 ? 1 : 0); gl.uniform1i(L.uR, r); gl.uniform2i(L.uDir, dx, dy);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); gl.bindTexture(gl.TEXTURE_2D, src); this.draw();
+        src = dst.tex; dst = dst === A ? B : A;
+      });
+      return B.tex;
+    }
+
     /**
      * Luminance noise reduction on stage 1's picture (brightness in its alpha): the same layers, smoothing
      * and thresholds as waveletDenoise() in pipeline.js. Returns the texture holding r = the smooth picture
@@ -622,12 +759,13 @@
       this.srcW = w; this.srcH = h;
     }
 
-    updateLut(s) {
-      const sig = JSON.stringify([s.curve, s.vibrance, s.saturation, s.hsl, s.bw, s.bwMix, s.grading, s.calib.shadowTint]);
+    updateLut(s, n) {
+      n = n || LUT_N;
+      const sig = n + JSON.stringify([s.curve, s.vibrance, s.saturation, s.hsl, s.bw, s.bwMix, s.grading, s.calib.shadowTint]);
       if (sig === this.lutSig) return;
       this.lutSig = sig;
       const gl = this.gl;
-      const data = halfArray(P.colorLUT(s, LUT_N));
+      const data = halfArray(P.colorLUT(s, n));
       gl.bindTexture(gl.TEXTURE_3D, this.lutTex);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -635,7 +773,7 @@
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, LUT_N, LUT_N, LUT_N, 0, gl.RGBA, gl.HALF_FLOAT, data);
+      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA16F, n, n, n, 0, gl.RGBA, gl.HALF_FLOAT, data);
     }
 
     /** The settings' imported .cube (opts.cube, or the app's cache), uploaded once per LUT. */
@@ -744,7 +882,8 @@
     /**
      * Render the current source with settings.
      * opts: { levelScale, fullLong, cropOverride, before, clipping, overlayMask, seed, frameIndex, target: "canvas"|"pixels", maxW,
-     *         window: { x, y, w, h } — only that part of the output (in output pixels) is drawn in the last pass }
+     *         window: { x, y, w, h } — only that part of the output (in output pixels) is drawn in the last pass,
+     *         exact: true — colour noise reduction and sharpening done as the CPU engine does them (for a render that is kept) }
      * Returns { width, height, fullWidth, fullHeight } — result is in this.canvas (or pixels when requested).
      */
     render(settings, opts) {
@@ -840,21 +979,26 @@
       // luminance noise reduction belongs before white balance and exposure (as in pipeline.js): the pass
       // stops after the input transfer, the wavelet passes run on that, and the pass is finished from there
       const wave = s.detail.nrLuma > 0 && this.floatOk;
+      const exact = !!opts.exact && this.floatOk && !opts.window && !opts.maxW;
+      const chroma = exact && s.detail.nrColor > 0, split = wave || chroma;
       // (made before the texture units below are set: making a texture leaves it bound to the unit in use,
       // and a texture that is both drawn into and bound to one of the program's samplers is an error)
       gl.activeTexture(gl.TEXTURE15);          // a unit no program reads
-      const pre = wave ? this.fbo('pre', outW, outH, true) : null;
+      const pre = split ? this.fbo('pre', outW, outH, true) : null;
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uPre, 13);
       gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uNr, 14);
-      if (wave) {
+      if (split) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, pre.fb); gl.uniform1i(pr.locs.uStage, 1); this.draw();
-        const nr = this.wavelet(pre, outW, outH, s.detail.nrLuma / 100, s.detail.nrDetail / 100, rs);
+        const nr = wave ? this.wavelet(pre, outW, outH, s.detail.nrLuma / 100, s.detail.nrDetail / 100, rs) : null;
+        // the exact render also does colour noise reduction here; its result already holds the luminance step
+        const from = chroma ? this.chromaNR(pre, nr, outW, outH, s.detail.nrColor / 100, rs) : pre.tex;
         gl.useProgram(pr.p); gl.bindFramebuffer(gl.FRAMEBUFFER, f1.fb); gl.viewport(0, 0, outW, outH);
-        gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, pre.tex);
-        gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, nr);
+        gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, from);
+        gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, chroma || !nr ? this.dummy : nr);
         gl.uniform1i(pr.locs.uStage, 2); this.draw();
         gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, this.dummy);
+        if (exact) this.dropFbo('pre', 'nrT', 'nrA', 'nrB', 'cT', 'preC');
       } else { gl.uniform1i(pr.locs.uStage, 0); this.draw(); }
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, f1.tex);
@@ -899,7 +1043,9 @@
       const fullW = tw, fullH = th;
       if (win) { tw = win.w; th = win.h; }
       let f2 = null;
-      if (toPixels) { f2 = this.fbo('out', tw, th, false); gl.bindFramebuffer(gl.FRAMEBUFFER, f2.fb); }
+      const post = exact && s.detail.sharpen > 0;          // the exact render sharpens the finished picture in a pass of its own
+      if (post) { gl.activeTexture(gl.TEXTURE15); f2 = this.fbo('p2', tw, th, true); gl.bindTexture(gl.TEXTURE_2D, null); gl.bindFramebuffer(gl.FRAMEBUFFER, f2.fb); }
+      else if (toPixels) { f2 = this.fbo('out', tw, th, false); gl.bindFramebuffer(gl.FRAMEBUFFER, f2.fb); }
       else { if (this.canvas.width !== tw || this.canvas.height !== th) { this.canvas.width = tw; this.canvas.height = th; } gl.bindFramebuffer(gl.FRAMEBUFFER, null); }
       gl.viewport(0, 0, tw, th);
       pr = this.p2; gl.useProgram(pr.p);
@@ -914,7 +1060,9 @@
       gl.uniform2f(pr.locs.uP1Size, outW, outH);
       gl.uniform1i(pr.locs.uHasYl, yl ? 1 : 0); gl.uniform1i(pr.locs.uHasYt, yt ? 1 : 0); gl.uniform1i(pr.locs.uHasDC, dc ? 1 : 0);
       const useLut = !this.isLutIdentity(s);
-      if (useLut) this.updateLut(s);
+      const lutN = exact ? 65 : LUT_N;          // the exact render: the table size of the CPU's full-quality renders
+      if (useLut) this.updateLut(s, lutN);
+      gl.uniform1f(pr.locs.uLutN, lutN); gl.uniform1i(pr.locs.uLutTetra, exact ? 1 : 0);
       gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_3D, this.lutTex); gl.uniform1i(pr.locs.uLut, 4);
       gl.uniform1i(pr.locs.uUseLut, useLut ? 1 : 0);
       this.bindCube(pr, s, opts, 12, 'look');
@@ -932,14 +1080,31 @@
       gl.uniform1f(pr.locs.uGrainRough, e.grainRough / 100); gl.uniform1f(pr.locs.uRs, rs);
       gl.uniform1ui(pr.locs.uSeed, ((opts.seed | 0) + (opts.frameIndex | 0) * 7919) >>> 0);
       const d = s.detail;
-      gl.uniform1f(pr.locs.uSharpAmt, d.sharpen / 100 * 1.4); gl.uniform1f(pr.locs.uSharpLim, 0.03 + (d.detail / 100) * 0.22);
+      gl.uniform1f(pr.locs.uSharpAmt, post ? 0 : d.sharpen / 100 * 1.4); gl.uniform1f(pr.locs.uSharpLim, 0.03 + (d.detail / 100) * 0.22);
       gl.uniform1f(pr.locs.uSharpRad, d.radius * Math.max(0.5, rs)); gl.uniform1f(pr.locs.uSharpMask, d.masking / 100);
-      gl.uniform1f(pr.locs.uNrLuma, wave ? 0 : d.nrLuma / 100); gl.uniform1f(pr.locs.uNrDetail, d.nrDetail / 100); gl.uniform1f(pr.locs.uNrColor, d.nrColor / 100);
+      gl.uniform1f(pr.locs.uNrLuma, wave ? 0 : d.nrLuma / 100); gl.uniform1f(pr.locs.uNrDetail, d.nrDetail / 100); gl.uniform1f(pr.locs.uNrColor, chroma ? 0 : d.nrColor / 100);
       gl.uniform1i(pr.locs.uClipHi, opts.clipping && opts.clipping.hi ? 1 : 0);
       gl.uniform1i(pr.locs.uClipLo, opts.clipping && opts.clipping.lo ? 1 : 0);
       gl.uniform1i(pr.locs.uOverlayMask, opts.overlayMask ?? -1);
       this.draw();
       this.srcW = realW; this.srcH = realH;
+      if (post) {
+        if (exact) this.dropFbo('p1', 'yla', 'ylb', 'yta', 'ytb', 'dca', 'dcb');
+        const yb = this.blurLuma(f2.tex, tw, th, Math.max(0.5, d.radius * Math.max(0.5, rs)), 'sb');
+        const ym = d.masking > 0 ? this.blurLuma(f2.tex, tw, th, Math.max(1, 2.5 * rs), 'sc') : null;
+        gl.activeTexture(gl.TEXTURE15);
+        const dst = toPixels ? this.fbo('out', tw, th, false) : null;
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        if (!toPixels && (this.canvas.width !== tw || this.canvas.height !== th)) { this.canvas.width = tw; this.canvas.height = th; }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst ? dst.fb : null); gl.viewport(0, 0, tw, th);
+        const L = this.pp.locs; gl.useProgram(this.pp.p);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, f2.tex); gl.uniform1i(L.uImg, 0);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, yb); gl.uniform1i(L.uYb, 1);
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, ym || this.dummy); gl.uniform1i(L.uYm, 2);
+        gl.uniform1f(L.uAmt, d.sharpen / 100 * 1.4); gl.uniform1f(L.uLim, 0.03 + (d.detail / 100) * 0.22); gl.uniform1f(L.uMask, d.masking / 100); gl.uniform1i(L.uHasYm, ym ? 1 : 0);
+        this.draw();
+        gl.activeTexture(gl.TEXTURE0);
+      }
       const out = { width: tw, height: th, fullWidth: outW, fullHeight: outH, window: win };
       if (toPixels) {
         const px = new Uint8Array(tw * th * 4);
