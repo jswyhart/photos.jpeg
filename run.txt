@@ -1,0 +1,5 @@
+running after 25 s
+total 0
+drwxr-xr-x   3 runner  staff   96 Nov 25 17:12 .
+drwx------+ 31 runner  staff  992 Nov 25 17:12 ..
+drwxr-xr-x   2 runner  staff   64 Nov 25 17:12 thumbs
