@@ -11,8 +11,8 @@ android {
         applicationId = "app.photosjpeg.android"
         minSdk = 29
         targetSdk = 35
-        versionCode = 5
-        versionName = "2.2.0"
+        versionCode = 6
+        versionName = "2.2.1"
     }
 
     // Your own release key: point PJ_KEYSTORE at the keystore file and give PJ_KEYSTORE_PASSWORD,

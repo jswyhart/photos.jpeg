@@ -1,8 +1,16 @@
 # Changes
 
-## Unreleased
+## 2.2.1
+
+**Fixed**
+- Masking: the Subject, Sky, People, Background and Person buttons no longer stay greyed out after a mask has been found
+- Masking: "Show overlay (O)" follows the O key
+- A photo is marked missing only when its file is gone; an empty or damaged file says why it cannot be opened
 
 **Better**
+- macOS: shortcuts are shown with Mac keys, Option+Y works, and the settings window is called Settings
+- A JPEG XL DNG opened from its embedded preview says where to turn on developing it
+- The macOS disk image is published with each release (unsigned: see the release notes for how to open it)
 - Content-aware fill: removing something that hung across the line between two materials (a sign in front of a roofline and the sky) now keeps wall and sky apart along one clean line, instead of letting the sky eat into the wall
 
 ## 2.2.0
