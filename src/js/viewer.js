@@ -148,6 +148,7 @@
         if (res && photo === st.photo) {
           const [fw, fh] = foDims();
           st.after = { canvas: E.toCanvas(res), w: fw, h: fh, version: ver, level: quality };
+          gpuTile(photo, settings, ver);          // zoomed in: the sharp 1:1 window comes with every frame, not after a pause
           if (st.liveClear && !playingHere()) { st.live = null; st.liveClear = false; }
           events.emit('rendered', res, quality);
           if (quality === 'proxy') scheduleTile();
@@ -204,15 +205,15 @@
     }
 
     /* 1:1 tiles from the full-resolution source */
-    const scheduleTile = UI.debounce(async () => {
-      if (!st.photo || st.tool === 'crop' || st.live) return;
+    /** The part of the photo in view, in full-size output pixels — null when the proxy is sharp enough for this zoom, or there is nothing to draw. */
+    function tileRect() {
+      if (!st.photo || st.tool === 'crop' || st.live) return null;
       const s = srcInfo();
-      if (!s) return;
+      if (!s || !s.proxy) return null;
       const pane = mainPane();
       const proxyScale = Math.max(s.proxy.width, s.proxy.height) / Math.max(s.fullW, s.fullH);
       const dpr = window.devicePixelRatio || 1;
-      if (pane.scale * dpr <= proxyScale * 1.2) return; // proxy is sharp enough
-      const [vw, vh] = vpSize();
+      if (pane.scale * dpr <= proxyScale * 1.2) return null; // proxy is sharp enough
       const [fw, fh] = foDims();
       const a = toFo(pane.x, pane.y, pane), b = toFo(pane.x + pane.w, pane.y + pane.h, pane);
       const rect = {
@@ -221,7 +222,32 @@
       };
       rect.w = Math.min(fw, Math.ceil(Math.max(a[0], b[0]))) - rect.x;
       rect.h = Math.min(fh, Math.ceil(Math.max(a[1], b[1]))) - rect.y;
-      if (rect.w <= 0 || rect.h <= 0 || rect.w * rect.h > 16e6) return;
+      if (rect.w <= 0 || rect.h <= 0 || rect.w * rect.h > 16e6) return null;
+      return rect;
+    }
+    /**
+     * The 1:1 tile drawn on the GPU, at once: while a slider is dragged, and as the view is moved or zoomed.
+     * Returns true when it was drawn. It needs the photo's full-size pixels in memory (the first 1:1 tile of
+     * a photo, made by the CPU below, loads them); the CPU's exact tile still replaces it once things settle.
+     */
+    function gpuTile(photo, settings, ver) {
+      if (!E.renderGPUTile || photo !== st.photo || photo.kind === 'video') return false;
+      const rect = tileRect();
+      if (!rect) return false;
+      const res = E.renderGPUTile(photo, settings, renderOpts({ region: rect }));
+      if (!res) return false;
+      st.tile = { canvas: res.canvas, rect: res.region, version: ver, gpu: true };
+      return true;
+    }
+    /** The GPU's 1:1 tile for the view as it is now (panning, zooming); true when there is one. */
+    function tileHere() { return !!(st.photo && st.after && st.after.version === st.version && gpuTile(st.photo, P.clone(st.photo.settings), st.version)); }
+    function requestTile() {
+      if (tileHere()) draw();
+      scheduleTile();
+    }
+    const scheduleTile = UI.debounce(async () => {
+      const rect = tileRect();
+      if (!rect) return;
       const ver = st.version, photo = st.photo;
       rendering.textContent = 'Loading 1:1…';
       rendering.classList.add('on');
@@ -234,7 +260,6 @@
       } catch (e) { console.warn('tile failed', e); }
       rendering.textContent = 'Rendering…';
       rendering.classList.remove('on');
-      void vw; void vh;
     }, 220);
 
     /* ---------------- drawing ---------------- */
@@ -757,7 +782,7 @@
     });
     const touchEnd = (e) => {
       touches.delete(e.pointerId);
-      if (pinch && touches.size < 2) { pinch = null; drag = null; scheduleTile(); setCursor(); events.emit('zoom'); }
+      if (pinch && touches.size < 2) { pinch = null; drag = null; requestTile(); setCursor(); events.emit('zoom'); }
     };
     root.addEventListener('pointerup', touchEnd);
     root.addEventListener('pointercancel', touchEnd);
@@ -915,6 +940,7 @@
         if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
         st.center = [drag.c[0] - dx / pane.scale, drag.c[1] - dy / pane.scale];
         st.tile = null;
+        tileHere();              // the sharp window follows the hand
         draw();
         return;
       }
@@ -1027,7 +1053,7 @@
           }
           setZoom('fit');
         }
-        else scheduleTile();
+        else requestTile();
       } else if (d.kind === 'cropRotate') {
         st.crop.rotating = false; st.crop.fullBeforeRotate = false;
         update('commit'); events.emit('geo');
@@ -1101,7 +1127,7 @@
         st.center = [c[0] + e.deltaX * lines / pane.scale, c[1] + e.deltaY * lines / pane.scale];
         st.tile = null;
         draw();
-        scheduleTile();
+        requestTile();
         return;
       }
       const cur = mainPane().scale * dpr;
@@ -1124,7 +1150,7 @@
       // keep fo point under the cursor
       st.center = [fo[0] - (x - (pane.x + pane.w / 2)) / sc, fo[1] - (y - (pane.y + pane.h / 2)) / sc];
       st.tile = null;
-      draw(); setCursor(); scheduleTile();
+      draw(); setCursor(); requestTile();
       events.emit('zoom');
     }
     function setZoom(z) {
@@ -1231,7 +1257,7 @@
     window.addEventListener('keyup', (e) => { if (e.code === 'Space') { spaceDown = false; setCursor(); } });
     function isTyping(e) { const t = e.target; return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
 
-    new ResizeObserver(() => { if (st.photo) { draw(); scheduleTile(); } }).observe(root);
+    new ResizeObserver(() => { if (st.photo) { draw(); requestTile(); } }).observe(root);
 
     /* ---------------- public API ---------------- */
     const api = {
@@ -1239,6 +1265,7 @@
       async setPhoto(photo) {
         if (st.tool === 'crop') { st.tool = 'none'; st.crop = null; }
         st.photo = photo; st.after = null; st.before = null; st.tile = null; st.center = null; st.live = null; st.liveClear = false;
+        if (E.dropGpuFull) E.dropGpuFull();          // the previous photo's full-size picture leaves the graphics card
         st.spotSel = -1; st.maskIdx = photo && photo.settings.masks.length ? 0 : -1;
         st.version++;
         draw();
@@ -1327,7 +1354,7 @@
       setCropAspect: applyCropAspect, swapCropOrientation, setStraighten,
       setCropLock(b) { if (st.crop) st.crop.lock = b; },
       autoStraighten() { setStraighten(0, 'commit'); },
-      setCompare(mode) { st.compare = mode; if (needsBefore()) renderBefore(); draw(); scheduleTile(); events.emit('compare'); },
+      setCompare(mode) { st.compare = mode; if (needsBefore()) renderBefore(); draw(); requestTile(); events.emit('compare'); },
       holdBefore(b) { st.holdBefore = b; if (b) renderBefore(); draw(); },
       setClipping(c) { st.clipping = c; update('commit'); },
       setZoom, zoomAt, currentCenter,
@@ -1366,7 +1393,7 @@
       pickColor(cb) { st.colorPick = cb; root.classList.add('cur-picker'); PJ.UI.toast('Click the colour in the photo', 'eye-dropper'); },
       activeMask,
       foDims, fullDims, panes, mainPane, toFo, toScreen,
-      setCenter(c) { st.center = c; st.tile = null; draw(); scheduleTile(); },
+      setCenter(c) { st.center = c; st.tile = null; draw(); requestTile(); },
       setCursor
     };
     return api;

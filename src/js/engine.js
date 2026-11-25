@@ -649,7 +649,9 @@
   async function makeThumb(photo) {
     try {
       PJ.UI.activity(`Generating previews… (${thumbQueue.size + thumbActive})`);
-      const src = await ensureSource(photo, 'any');
+      // (loaded like a photo developed ahead of time: a thumbnail made in the background must not take the
+      // full-size pixels away from the photo that is open — its 1:1 view would have to read the file again)
+      const src = await ensureSource(photo, 'any', { prefetch: true });
       const res = await render(photo, photo.settings, 'draft', {}, 2, 'any');
       if (!res) return;
       // Perceptual hash of the unedited picture, for the duplicate finder
@@ -763,6 +765,74 @@
   }
 
   /** Full-resolution render for export (parallel bands). */
+  /* ---------------- the photo at full size on the GPU: the 100 % view ---------------- */
+  // A renderer of its own: the preview's keeps the proxy picture loaded, this one the full-size one (a
+  // 50-megapixel photo and what is drawn from it take the better part of a gigabyte on the card, given
+  // back when another photo is opened). If the card cannot do it — too slow, out of memory, a lost
+  // context — it is switched off for the session and the CPU draws the 100 % view as before.
+  let gpuF = null, gpuFOff = false, gpuFSig = '', gpuFSlow = 0;
+  function gpuFullReady() {
+    if (gpuFOff || !gpuReady() || PJ.Catalog.pref('gpu.full', true) === false) return false;      // the same switches and software-renderer check as the preview
+    if (!gpuF) {
+      try {
+        gpuF = new PJ.GL.Renderer({ p3: P3_CANVAS });
+        if (!gpuF.floatOk) throw new Error('no float textures');
+        gpuF.maxTex = gpuF.gl.getParameter(gpuF.gl.MAX_TEXTURE_SIZE);
+      } catch (e) { console.warn('GPU 100% view unavailable:', e.message); gpuF = null; gpuFOff = true; return false; }
+      gpuF.canvas.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); gpuF = null; gpuFSig = ''; gpuFOff = true; });
+    }
+    return true;
+  }
+  function dropGpuFull() { if (gpuF && gpuFSig) { try { gpuF.release(); } catch (_) { } gpuFSig = ''; } }
+  /**
+   * A window of the photo at full size, drawn on the GPU: opts as for render(), with region { x, y, w, h } in
+   * full-size output pixels. Synchronous. null when it cannot be done here — the full-size pixels are not in
+   * memory yet, a mask or fill is still loading, the photo is larger than the card takes, or the edit needs
+   * something only the CPU render does (a look in wide colour, a printer proof).
+   */
+  function renderGPUTile(photo, settings, opts) {
+    if (!photo || photo.kind === 'video' || !opts || !opts.region || !gpuFullReady()) return null;
+    if (PJ.AIMask && !PJ.AIMask.ready(settings)) return null;
+    if (PJ.Fill && !PJ.Fill.ready(settings)) return null;
+    const src = cachedSource(photo);
+    if (!src || !src.full) return null;
+    const lv = src.full;
+    if (Math.max(lv.width, lv.height) > gpuF.maxTex || lv.width * lv.height > 80e6) return null;
+    try {
+      const t0 = performance.now();
+      const s = P.normalizeSettings(settings);
+      const spots = s.spots && s.spots.length ? s.spots : null;
+      const sig = src.key + '|full|' + lv.width + 'x' + lv.height + '|' + (spots ? JSON.stringify(spots) : '');
+      const fresh = sig !== gpuFSig || gpuF.srcLevel !== lv;
+      if (fresh) {
+        const data = spots ? P.applySpots(lv.data, lv.width, lv.height, spots) : lv.data;
+        gpuF.setPixels(data, lv.width, lv.height);
+        gpuF.srcLevel = lv; gpuFSig = sig;
+      }
+      gpuF.srcW = lv.width; gpuF.srcH = lv.height;
+      const o = Object.assign({}, opts, { levelScale: 1, fullLong: Math.max(src.fullW, src.fullH), seed: seedFor(photo), target: 'canvas', window: opts.region });
+      delete o.region;
+      if (src.input) { o.srcInput = src.input; o.wide = !!photo.wide; }
+      if (s.lut.id && PJ.LUTs) { o.cube = PJ.LUTs.getSync(s.lut.id); if (!o.cube) { PJ.LUTs.get(s.lut.id); return null; } }
+      const wide = P.isWide(s, o);
+      if (o.gamutCube || (wide && (!P3_CANVAS || (o.cube && s.lut.amount > 0) || o.gamutWarn))) return null;
+      const r = gpuF.render(s, o), gl = gpuF.gl, err = gl.getError();
+      if (err !== gl.NO_ERROR) throw new Error('graphics error ' + err + (err === gl.OUT_OF_MEMORY ? ' (out of memory)' : ''));
+      const canvas = Dec.makeCanvas(r.width, r.height);
+      canvas.getContext('2d', gpuF.p3 ? { colorSpace: 'display-p3' } : undefined).drawImage(gpuF.canvas, 0, 0);
+      const ms = performance.now() - t0;
+      // slower than the worker threads would be (an old or integrated card): not worth it. The first frame of a photo, which loads it onto the card, does not count.
+      if (!fresh) { gpuFSlow = gpuFSlow * 0.7 + (ms > 250 ? 1 : 0) * 0.3; if (gpuFSlow > 0.6 && !PJ.Catalog.pref('gpu.force', false)) throw new Error('slower than the CPU here'); }
+      return { canvas, width: r.width, height: r.height, fullWidth: r.fullWidth, fullHeight: r.fullHeight, region: r.window, ms, level: 'full', gpu: true, space: gpuF.p3 ? 'p3' : 'srgb', wide };
+    } catch (e) {
+      console.warn('GPU 100% view failed; the CPU draws it from now on:', e && e.message || e);
+      gpuFOff = true;
+      try { if (gpuF) gpuF.release(); } catch (_) { }
+      gpuFSig = '';
+      return null;
+    }
+  }
+
   async function renderFull(photo, settings, onProgress, opts) {
     onProgress && onProgress(0.05);
     const res = await render(photo, settings, 'full', opts || {}, 1);
@@ -779,10 +849,11 @@
 
   function dropFull() {
     for (const s of sources.values()) if (s.full) { s.full = null; pool.forget(s.key + '|full'); }
+    dropGpuFull();
   }
 
   global.PJ.Engine = {
     P3_CANVAS, PROXY_EDGE, DRAFT_EDGE, pool, ensureSource, cachedSource, needsDevelop, prefetch, ensureFull, render, toCanvas,
-    queueThumb, thumbStatus: () => ({ active: thumbActive, queued: thumbQueue.size }), thumbEvents, autoTone, autoGrade, autoWB, sampleAt, renderFull, renderGPU, gpuReady, dhash, gpuInfo: () => ({ on: !!gpu && !gpuOff, off: gpuOff }), dropFull, seedFor, invalidate
+    queueThumb, thumbStatus: () => ({ active: thumbActive, queued: thumbQueue.size }), thumbEvents, autoTone, autoGrade, autoWB, sampleAt, renderFull, renderGPU, renderGPUTile, dropGpuFull, gpuReady, dhash, gpuInfo: () => ({ on: !!gpu && !gpuOff, off: gpuOff, full: !!gpuF && !gpuFOff, fullOff: gpuFOff }), dropFull, seedFor, invalidate
   };
 })(window);

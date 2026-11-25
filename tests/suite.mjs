@@ -665,6 +665,39 @@ test('focus stack: sharp parts of two photos are merged into one', async () => {
   return `error ${r.before.join(' / ')} → ${r.after}`;
 });
 
+test('100% view on the GPU: a window of the full-size photo matches the CPU, noise reduction included', async () => {
+  const r = await page(async () => {
+    const E = PJ.Engine, P = PJ.Pipeline, p = PJ.Catalog.state.photos.find(x => x.name === 'building.jpg');
+    if (!E.gpuReady() || !E.renderGPUTile) return { skipped: 'no GPU' };
+    const src = await E.ensureFull(p);
+    const run = async (fn) => {
+      const s = P.defaultSettings(); fn(s);
+      const probe = await E.render(p, P.clone(s), 'full', {}, 0), fw = probe.width, fh = probe.height;
+      const region = { x: Math.round(fw * 0.3), y: Math.round(fh * 0.35), w: Math.round(fw * 0.4), h: Math.round(fh * 0.3) };
+      const space = E.P3_CANVAS ? 'p3' : 'srgb';
+      const cpu = await E.render(p, P.clone(s), 'full', { region, outSpace: space }, 0), g = E.renderGPUTile(p, P.clone(s), { region, outSpace: space });
+      if (!g) return { none: JSON.stringify(E.gpuInfo()) };
+      const a = g.canvas.getContext('2d', E.P3_CANVAS ? { colorSpace: 'display-p3' } : undefined).getImageData(0, 0, g.width, g.height, { colorSpace: cpu.space === 'p3' ? 'display-p3' : 'srgb' }).data, b = cpu.data;
+      let sum = 0, max = 0, n = 0;
+      for (let i = 0; i < a.length; i += 4) for (let c = 0; c < 3; c++) { const d = Math.abs(a[i + c] - b[i + c]); sum += d; n++; if (d > max) max = d; }
+      return { same: g.width === cpu.width && g.height === cpu.height && JSON.stringify(g.region) === JSON.stringify(cpu.region), mean: +(sum / n).toFixed(2), max };
+    };
+    const tone = await run(s => { s.exposure = 0.3; s.highlights = -40; s.shadows = 30; s.contrast = 15; });
+    const noise = await run(s => { s.detail.nrLuma = 40; s.exposure = 0.3; });
+    const turned = await run(s => { s.geo.rotate = 3; s.detail.nrLuma = 30; s.clarity = 15; });
+    E.dropFull();
+    return { size: src.fullW + 'x' + src.fullH, tone, noise, turned, info: E.gpuInfo() };
+  });
+  if (r.skipped) return 'skipped: ' + r.skipped;
+  for (const k of ['tone', 'noise', 'turned']) {
+    assert(!r[k].none, `${k}: the GPU did not draw the window (${r[k].none})`);
+    assert(r[k].same, `${k}: the GPU window is not the part of the picture the CPU drew: ` + JSON.stringify(r[k]));
+    assert(r[k].mean < 0.8 && r[k].max <= 6, `${k}: GPU and CPU differ: ` + JSON.stringify(r[k]));
+  }
+  assert(r.info.full && !r.info.fullOff, 'the GPU 100% view switched itself off: ' + JSON.stringify(r.info));
+  return `mean difference ${r.tone.mean} (tone), ${r.noise.mean} (noise reduction), ${r.turned.mean} (rotated) of 255`;
+});
+
 test('stacks collapse and reopen', async () => {
   const r = await page(async () => {
     const App = PJ.App, Cat = PJ.Catalog, w = (ms) => new Promise(r => setTimeout(r, ms));

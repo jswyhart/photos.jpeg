@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+**Better**
+- Develop at 100%: the sharp full-size view now follows every slider movement and pan at once (drawn on the graphics card), instead of appearing after a pause
+- Noise reduction looks the same while dragging as after: the GPU preview uses the same method as the final render
+- Thumbnails made in the background no longer make the open photo reload for its 1:1 view
+
 ## 2.2.1
 
 **Fixed**

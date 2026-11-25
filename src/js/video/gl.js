@@ -4,6 +4,9 @@
  *   pass 1  geometry + input transfer (sRGB or camera log → Rec.709)
  *           + lens vignette + calibration + white balance + exposure
  *           + mask-local exposure/temp/tint            → RGBA16F
+ *           (with luminance noise reduction on, pass 1 runs in two halves around the
+ *           wavelet passes: up to the input transfer, the wavelet shrinkage — the same
+ *           layers and thresholds as pipeline.js — then the rest)
  *   blurs   luma pyramids for highlights/shadows/clarity, texture, dehaze
  *   pass 2  dehaze, contrast, H/S/W/B, clarity, texture (global + masks),
  *           color stage via 3D LUT built by the CPU engine, local saturation,
@@ -22,7 +25,8 @@
   const COMMON = `#version 300 es
   precision highp float; precision highp int; precision highp sampler3D;
   uniform vec2 uOut;        // full output size (px) at this render level
-  uniform vec2 uTarget;     // size of the framebuffer being drawn
+  uniform vec2 uTarget;     // size of the whole picture being drawn (the framebuffer, unless only a window of it is drawn)
+  uniform vec2 uOrg;        // where the framebuffer's corner lies in that picture (0, 0 unless a window is drawn)
   uniform vec2 uSrcSize;    // source texture size
   // geometry
   uniform vec2 uX0Y0; uniform float uCa, uSa, uSc, uAsp, uHalf, uKv, uKh, uHalfDiag2, uKd, uPolyR, uFish; uniform vec4 uPoly;
@@ -36,7 +40,7 @@
   uniform vec2 uBrushGrid[${MAX_BRUSH}];
   uniform float uL;          // source long edge (px)
 
-  vec2 outCoord(){ vec2 f = gl_FragCoord.xy / uTarget * uOut; return vec2(f.x, uOut.y - f.y); }
+  vec2 outCoord(){ vec2 f = (gl_FragCoord.xy + uOrg) / uTarget * uOut; return vec2(f.x, uOut.y - f.y); }
 
   vec2 toSource(vec2 o){
     vec2 d = uX0Y0 + o;
@@ -144,20 +148,29 @@
   uniform mat3 uCalib; uniform bool uHasCalib;
   uniform float uLensVig, uLensMid; uniform vec4 uProfVig; uniform float uTcaR; uniform vec2 uTcaV, uTcaC, uTcaB;
   uniform bool uLocalLin;
+  // 0: the whole pass. 1: only up to the input transfer (rgb, brightness in a) — what noise reduction works on.
+  // 2: the rest, starting from stage 1's picture (uPre) with the denoised brightness (uNr: smooth layer + kept detail).
+  uniform int uStage; uniform sampler2D uPre, uNr;
   out vec4 frag;
 
   void main(){
     vec2 o = outCoord();
     vec2 s = toSource(o);
-    vec3 c; bool inside = !(s.x < -0.5 || s.y < -0.5 || s.x > uSrcSize.x + 0.5 || s.y > uSrcSize.y + 0.5);
-    vec3 raw = inside ? texture(uSrc, s / uSrcSize).rgb : vec3(0.11);
+    vec3 raw; vec3 lin;
+    if (uStage == 2) {
+      ivec2 q = ivec2(gl_FragCoord.xy);
+      vec4 pre = texelFetch(uPre, q, 0); vec2 nr = texelFetch(uNr, q, 0).rg;
+      raw = pre.rgb + (nr.r + nr.g - pre.a);
+      lin = toLin(raw);
+    } else {
+    bool inside = !(s.x < -0.5 || s.y < -0.5 || s.x > uSrcSize.x + 0.5 || s.y > uSrcSize.y + 0.5);
+    raw = inside ? texture(uSrc, s / uSrcSize).rgb : vec3(0.11);
     if (inside && uTcaR != 0.0) {
       // lens profile: red and blue are read where the lens actually put them
       vec2 cen = uSrcSize * 0.5, dd = s - cen; float tr = length(dd) / uTcaR;
       raw.r = texture(uSrc, (cen + dd * (uTcaV.x + tr * (uTcaC.x + tr * uTcaB.x))) / uSrcSize).r;
       raw.b = texture(uSrc, (cen + dd * (uTcaV.y + tr * (uTcaC.y + tr * uTcaB.y))) / uSrcSize).b;
     }
-    vec3 lin;
     if (uCubeIn && inside) {
       vec3 cc = clamp(raw, 0.0, 1.0);
       raw = mix(cc, texture(uCube, cc * ((uCubeN - 1.0)/uCubeN) + 0.5/uCubeN).rgb, uCubeAmt);
@@ -188,6 +201,8 @@
       lin = toLin(raw);
       if (uSrcP3 && inside) { lin = max(uSiPre * lin, 0.0); raw = toSrgb(lin); }      // a Display P3 picture edited in sRGB
     }
+    if (uStage == 1) { frag = vec4(raw, luma(raw)); return; }
+    }
     float y0 = luma(raw);
     if (uLensVig != 0.0) {
       vec2 dc = s - uSrcSize*0.5;
@@ -213,6 +228,33 @@
       if (ev != 0.0 || lt != 0.0 || li != 0.0) lin *= wbGains(lt, li) * exp2(ev);
     }
     frag = vec4(toSrgb(lin), y0);
+  }`;
+
+  /* ---------------- luminance noise reduction: wavelet shrinkage, as waveletDenoise() in pipeline.js ----------------
+   * One layer takes two draws. uMode 0: the current layer smoothed along x (B3 spline, taps uGap apart).
+   * uMode 1: that smoothed along y gives the next, coarser layer; the difference to the current one is this
+   * layer's detail, of which what stands above the layer's noise level is kept and added to what earlier
+   * layers kept. Output: r = the next layer, g = the detail kept so far. */
+  const WAVE = `#version 300 es
+  precision highp float; precision highp int;
+  uniform sampler2D uA;      // the current layer: stage 1's picture (brightness in a) for the first layer, else r = layer, g = kept detail
+  uniform sampler2D uT;      // uMode 1: the current layer smoothed along x
+  uniform int uMode, uGap; uniform bool uFirst; uniform float uT2;
+  out vec4 frag;
+  float cur(ivec2 p, ivec2 size){ p = clamp(p, ivec2(0), size - 1); return uFirst ? texelFetch(uA, p, 0).a : texelFetch(uA, p, 0).r; }
+  float tx(ivec2 p, ivec2 size){ return texelFetch(uT, clamp(p, ivec2(0), size - 1), 0).r; }
+  void main(){
+    ivec2 p = ivec2(gl_FragCoord.xy), size = textureSize(uA, 0);
+    if (uMode == 0) {
+      ivec2 g = ivec2(uGap, 0);
+      frag = vec4((cur(p - 2 * g, size) + cur(p + 2 * g, size) + 4.0 * (cur(p - g, size) + cur(p + g, size)) + 6.0 * cur(p, size)) * 0.0625, 0.0, 0.0, 1.0);
+      return;
+    }
+    ivec2 g = ivec2(0, uGap);
+    float next = (tx(p - 2 * g, size) + tx(p + 2 * g, size) + 4.0 * (tx(p - g, size) + tx(p + g, size)) + 6.0 * tx(p, size)) * 0.0625;
+    float d = cur(p, size) - next, d2 = d * d, k = 1.25 - 0.6 * next, t2 = uT2 * k * k;   // shadows and mid-tones carry more visible noise
+    float kept = (uFirst ? 0.0 : texelFetch(uA, p, 0).g) + (d2 > t2 ? d * (1.0 - t2 / d2) : 0.0);
+    frag = vec4(next, kept, 0.0, 1.0);
   }`;
 
   /* ---------------- reduce: luma (r) + dark channel (g) ---------------- */
@@ -275,7 +317,7 @@
 
   void main(){
     vec2 o = outCoord();
-    vec2 uv = gl_FragCoord.xy / uTarget;
+    vec2 uv = (gl_FragCoord.xy + uOrg) / uTarget;
     vec4 p1 = texture(uP1, uv);
     vec3 c = p1.rgb; float y0 = p1.a;
     vec2 s = toSource(o);
@@ -290,8 +332,8 @@
     if (uSharpAmt > 0.0 || uNrLuma > 0.0 || uNrColor > 0.0) {
       vec2 px = 1.0 / uP1Size;
       float sig = max(0.5, uSharpRad);
-      // noise reduction for the live preview: an edge-aware (bilateral) mean over two rings of
-      // neighbours — close to what the wavelet method of the final render does at this size
+      // luminance noise reduction is done by the wavelet passes before this one (uNrLuma is 0 here then);
+      // without float textures it falls back to this edge-aware (bilateral) mean over two rings of neighbours
       float nT = 0.085 * uNrLuma * (1.25 - 0.6 * Y) * (1.6 - uNrDetail * 0.6), Yn = 0.0, wn = 0.0;
       for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
         float w = exp(-0.5 * float(i*i + j*j) / (sig*sig));
@@ -446,7 +488,7 @@
       this.floatOk = !!gl.getExtension('EXT_color_buffer_float');
       gl.getExtension('OES_texture_float_linear');
       this.p1 = this.program(PASS1); this.p2 = this.program(PASS2);
-      this.pr = this.program(REDUCE); this.pb = this.program(BLUR);
+      this.pr = this.program(REDUCE); this.pb = this.program(BLUR); this.pw = this.program(WAVE);
       const buf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -492,20 +534,59 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return t;
     }
-    fbo(name, w, h, float, mip) {
+    /** A texture to draw into, kept by name and remade when the size changes. channels 1 or 2: a half-float texture of that many (needs floatOk). */
+    fbo(name, w, h, float, mip, channels) {
       const gl = this.gl;
       let f = this.fbos[name];
       if (f && f.w === w && f.h === h) return f;
       if (f) { gl.deleteTexture(f.tex); gl.deleteFramebuffer(f.fb); }
       const tex = this.tex2d();
       const useF = float && this.floatOk;
-      gl.texImage2D(gl.TEXTURE_2D, 0, useF ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, useF ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+      if (channels === 1) gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, w, h, 0, gl.RED, gl.HALF_FLOAT, null);
+      else if (channels === 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, w, h, 0, gl.RG, gl.HALF_FLOAT, null);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, useF ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, useF ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
       if (mip) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       const fb = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
       f = this.fbos[name] = { tex, fb, w, h };
       return f;
+    }
+    /** Give back the memory of everything drawn into and of the source picture (a full-size photo holds a great deal). */
+    release() {
+      const gl = this.gl;
+      for (const k of Object.keys(this.fbos)) { gl.deleteTexture(this.fbos[k].tex); gl.deleteFramebuffer(this.fbos[k].fb); }
+      this.fbos = {};
+      gl.bindTexture(gl.TEXTURE_2D, this.srcTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      this.srcW = 1; this.srcH = 1;
+    }
+
+    /**
+     * Luminance noise reduction on stage 1's picture (brightness in its alpha): the same layers, smoothing
+     * and thresholds as waveletDenoise() in pipeline.js. Returns the texture holding r = the smooth picture
+     * that is left, g = the detail kept; their sum is the denoised brightness.
+     */
+    wavelet(pre, w, h, amount, detail, rs) {
+      const gl = this.gl, L = this.pw.locs;
+      const levels = Math.max(1, Math.min(4, Math.round(2 + Math.log2(Math.max(0.125, rs) * 4))));
+      const strength = [1, 0.35, 0.14, 0.06], base = 0.085 * amount * Math.min(1, 0.45 + 0.55 * rs);
+      gl.activeTexture(gl.TEXTURE15);          // a unit no program reads: new textures stay bound where they are made
+      const T = this.fbo('nrT', w, h, true, false, 1), A = this.fbo('nrA', w, h, true, false, 2), B = this.fbo('nrB', w, h, true, false, 2);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.useProgram(this.pw.p); gl.viewport(0, 0, w, h);
+      gl.uniform1i(L.uA, 0); gl.uniform1i(L.uT, 1);
+      let src = pre.tex, dst = A;
+      for (let j = 0; j < levels; j++) {
+        const t = base * strength[j] * (j === 0 ? 1.5 - detail : 1);
+        gl.uniform1i(L.uFirst, j === 0 ? 1 : 0); gl.uniform1i(L.uGap, 1 << j); gl.uniform1f(L.uT2, t * t);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src);
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.dummy);
+        gl.uniform1i(L.uMode, 0); gl.bindFramebuffer(gl.FRAMEBUFFER, T.fb); this.draw();
+        gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.tex);
+        gl.uniform1i(L.uMode, 1); gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); this.draw();
+        src = dst.tex; dst = dst === A ? B : A;
+      }
+      return src;
     }
 
     /** Upload a frame: VideoFrame | HTMLVideoElement | ImageBitmap | canvas | ImageData. */
@@ -589,7 +670,7 @@
     setGeometryUniforms(prog, g, outW, outH, tw, th) {
       const gl = this.gl, L = prog.locs, q = g.params;
       gl.uniform2f(L.uOut, outW, outH);
-      gl.uniform2f(L.uTarget, tw, th);
+      gl.uniform2f(L.uTarget, tw, th); gl.uniform2f(L.uOrg, 0, 0);
       gl.uniform2f(L.uSrcSize, this.srcW, this.srcH);
       gl.uniform2f(L.uX0Y0, q.x0, q.y0);
       gl.uniform1f(L.uCa, q.ca); gl.uniform1f(L.uSa, q.sa); gl.uniform1f(L.uSc, q.sc); gl.uniform1f(L.uAsp, q.asp);
@@ -662,7 +743,8 @@
 
     /**
      * Render the current source with settings.
-     * opts: { levelScale, fullLong, cropOverride, before, clipping, overlayMask, seed, frameIndex, target: "canvas"|"pixels", maxW }
+     * opts: { levelScale, fullLong, cropOverride, before, clipping, overlayMask, seed, frameIndex, target: "canvas"|"pixels", maxW,
+     *         window: { x, y, w, h } — only that part of the output (in output pixels) is drawn in the last pass }
      * Returns { width, height, fullWidth, fullHeight } — result is in this.canvas (or pixels when requested).
      */
     render(settings, opts) {
@@ -755,7 +837,26 @@
       gl.uniform4f(pr.locs.uProfVig, pv ? s.lens.vq : 0, +s.lens.v1 || 0, +s.lens.v2 || 0, +s.lens.v3 || 0);
       const localKeys = (k) => masks.some(m => m.adj && m.adj[k]);
       gl.uniform1i(pr.locs.uLocalLin, (localKeys('exposure') || localKeys('temp') || localKeys('tint')) ? 1 : 0);
-      this.draw();
+      // luminance noise reduction belongs before white balance and exposure (as in pipeline.js): the pass
+      // stops after the input transfer, the wavelet passes run on that, and the pass is finished from there
+      const wave = s.detail.nrLuma > 0 && this.floatOk;
+      // (made before the texture units below are set: making a texture leaves it bound to the unit in use,
+      // and a texture that is both drawn into and bound to one of the program's samplers is an error)
+      gl.activeTexture(gl.TEXTURE15);          // a unit no program reads
+      const pre = wave ? this.fbo('pre', outW, outH, true) : null;
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uPre, 13);
+      gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.uniform1i(pr.locs.uNr, 14);
+      if (wave) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, pre.fb); gl.uniform1i(pr.locs.uStage, 1); this.draw();
+        const nr = this.wavelet(pre, outW, outH, s.detail.nrLuma / 100, s.detail.nrDetail / 100, rs);
+        gl.useProgram(pr.p); gl.bindFramebuffer(gl.FRAMEBUFFER, f1.fb); gl.viewport(0, 0, outW, outH);
+        gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, pre.tex);
+        gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, nr);
+        gl.uniform1i(pr.locs.uStage, 2); this.draw();
+        gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, this.dummy); gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, this.dummy);
+      } else { gl.uniform1i(pr.locs.uStage, 0); this.draw(); }
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, f1.tex);
       gl.generateMipmap(gl.TEXTURE_2D);
 
@@ -787,14 +888,23 @@
 
       // ---------- pass 2 ----------
       const toPixels = opts.target === 'pixels';
-      const tw = opts.maxW ? Math.min(outW, opts.maxW) : outW;
-      const th = Math.max(1, Math.round(outH * tw / outW));
+      let tw = opts.maxW ? Math.min(outW, opts.maxW) : outW;
+      let th = Math.max(1, Math.round(outH * tw / outW));
+      // a window: the framebuffer is only as large as the window, and every position is taken within the whole picture
+      let win = null;
+      if (opts.window && !opts.maxW) {
+        const x = Math.max(0, Math.min(outW - 1, Math.round(opts.window.x))), y = Math.max(0, Math.min(outH - 1, Math.round(opts.window.y)));
+        win = { x, y, w: Math.max(1, Math.min(outW - x, Math.round(opts.window.w))), h: Math.max(1, Math.min(outH - y, Math.round(opts.window.h))) };
+      }
+      const fullW = tw, fullH = th;
+      if (win) { tw = win.w; th = win.h; }
       let f2 = null;
       if (toPixels) { f2 = this.fbo('out', tw, th, false); gl.bindFramebuffer(gl.FRAMEBUFFER, f2.fb); }
       else { if (this.canvas.width !== tw || this.canvas.height !== th) { this.canvas.width = tw; this.canvas.height = th; } gl.bindFramebuffer(gl.FRAMEBUFFER, null); }
       gl.viewport(0, 0, tw, th);
       pr = this.p2; gl.useProgram(pr.p);
-      this.setGeometryUniforms(pr, g, outW, outH, tw, th);
+      this.setGeometryUniforms(pr, g, outW, outH, fullW, fullH);
+      if (win) gl.uniform2f(pr.locs.uOrg, win.x, fullH - win.y - win.h);      // GL counts rows from the bottom
       this.setMaskUniforms(pr, masks, brushSlots);
       const bind = (unit, tex, name) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex || this.dummy); gl.uniform1i(pr.locs[name], unit); };
       bind(0, f1.tex, 'uP1'); bind(1, yl, 'uYl'); bind(2, yt, 'uYt'); bind(3, dc, 'uDC');
@@ -824,13 +934,13 @@
       const d = s.detail;
       gl.uniform1f(pr.locs.uSharpAmt, d.sharpen / 100 * 1.4); gl.uniform1f(pr.locs.uSharpLim, 0.03 + (d.detail / 100) * 0.22);
       gl.uniform1f(pr.locs.uSharpRad, d.radius * Math.max(0.5, rs)); gl.uniform1f(pr.locs.uSharpMask, d.masking / 100);
-      gl.uniform1f(pr.locs.uNrLuma, d.nrLuma / 100); gl.uniform1f(pr.locs.uNrDetail, d.nrDetail / 100); gl.uniform1f(pr.locs.uNrColor, d.nrColor / 100);
+      gl.uniform1f(pr.locs.uNrLuma, wave ? 0 : d.nrLuma / 100); gl.uniform1f(pr.locs.uNrDetail, d.nrDetail / 100); gl.uniform1f(pr.locs.uNrColor, d.nrColor / 100);
       gl.uniform1i(pr.locs.uClipHi, opts.clipping && opts.clipping.hi ? 1 : 0);
       gl.uniform1i(pr.locs.uClipLo, opts.clipping && opts.clipping.lo ? 1 : 0);
       gl.uniform1i(pr.locs.uOverlayMask, opts.overlayMask ?? -1);
       this.draw();
       this.srcW = realW; this.srcH = realH;
-      const out = { width: tw, height: th, fullWidth: outW, fullHeight: outH };
+      const out = { width: tw, height: th, fullWidth: outW, fullHeight: outH, window: win };
       if (toPixels) {
         const px = new Uint8Array(tw * th * 4);
         gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, px);
