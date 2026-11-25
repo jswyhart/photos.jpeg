@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 2.3.0
 
 **Faster**
 - Exports render on the graphics card: about 20 times faster for the render itself (a fully edited 50-megapixel photo in 0.2 s instead of 4 s on a fast card). The file is the same picture to within a fraction of a level; 16-bit TIFFs and PCs without a suitable card render on the CPU as before
