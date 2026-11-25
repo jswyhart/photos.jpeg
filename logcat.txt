@@ -1,0 +1,60 @@
+11-25 17:03:08.997   549  1396 V SplashScreenExceptionList: SplashScreen checking exception for package app.photosjpeg.android (target sdk:35) -> false
+11-25 17:03:09.008   549  1396 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=app.photosjpeg.android/.MainActivity} with LAUNCH_SINGLE_TASK from uid 2000 (BAL_ALLOW_PERMISSION) result code=0
+11-25 17:03:09.050   549   969 D CoreBackPreview: Window{d1ce9d3 u0 Splash Screen app.photosjpeg.android}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@609b407, mPriority=0, mIsAnimationCallback=false}
+11-25 17:03:09.182   549   588 I ActivityManager: Start proc 2207:app.photosjpeg.android/u0a209 for next-top-activity {app.photosjpeg.android/app.photosjpeg.android.MainActivity}
+11-25 17:03:09.316  1145  1145 I TopTaskTracker: onTaskMovedToFront: (moved taskInfo to front) taskId=8, baseIntent=Intent { flg=0x10000000 cmp=app.photosjpeg.android/.MainActivity }
+11-25 17:03:09.334   549   871 I SdkSandboxManager: No SDKs used. Skipping SDK data reconcilation for CallingInfo{mUid=10209, mPackageName='app.photosjpeg.android, mAppProcessToken='null'}
+11-25 17:03:09.373   549   574 V WindowManager:         {WCT{RemoteToken{31f2da7 Task{688b874 #8 type=standard A=10209:app.photosjpeg.android}}} m=OPEN f=NONE leash=Surface(name=Task=8)/@0xda57ec1 sb=Rect(0, 0 - 1080, 2400) eb=Rect(0, 0 - 1080, 2400) d=0 taskParent=-1},
+11-25 17:03:09.373   549   862 D ShortcutService: adding package: app.photosjpeg.android userId0
+11-25 17:03:09.373   549   862 D ShortcutService: handlePackageAdded: app.photosjpeg.android user=0
+11-25 17:03:09.373   549   862 D ShortcutService: rescanPackageIfNeeded 0@app.photosjpeg.android, forceRescan=true , isNewApp=true
+11-25 17:03:09.373   549   862 D ShortcutService: Package app.photosjpeg.android has 0 manifest shortcut(s), and 0 share target(s)
+11-25 17:03:09.416  2207  2207 W ziparchive: Unable to open '/data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.dm': No such file or directory
+11-25 17:03:09.416  2207  2207 W ziparchive: Unable to open '/data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.dm': No such file or directory
+11-25 17:03:09.552  2207  2207 D nativeloader: Configuring clns-7 for other apk /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk. target_sdk_version=35, uses_libraries=, library_path=/data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/app.photosjpeg.android
+11-25 17:03:09.590  1074  1074 D CarrierSvcBindHelper: onPackageAdded: app.photosjpeg.android
+11-25 17:03:09.875  1074  1272 D ImsResolver: maybeAddedImsService, packageName: app.photosjpeg.android
+11-25 17:03:10.089  2207  2290 I cr_VariationsUtils: Failed reading seed file "/data/user/0/app.photosjpeg.android/app_webview/variations_seed_new"
+11-25 17:03:10.089  2207  2290 I cr_VariationsUtils: Failed reading seed file "/data/user/0/app.photosjpeg.android/app_webview/variations_seed"
+11-25 17:03:10.336   549   588 I ActivityManager: Start proc 2318:com.google.android.webview:sandboxed_process0:org.chromium.content.app.SandboxedProcessService0:0/u0ai9000 for  {app.photosjpeg.android/org.chromium.content.app.SandboxedProcessService0:0}
+11-25 17:03:10.472   549   850 I AppWidgetServiceImpl: Updating package stopped masked state for uid 10209 package app.photosjpeg.android isStopped false
+11-25 17:03:10.929   549   968 D CoreBackPreview: Window{8d2fe56 u0 app.photosjpeg.android/app.photosjpeg.android.MainActivity}: Setting back callback OnBackInvokedCallbackInfo{mCallback=android.window.IOnBackInvokedCallback$Stub$Proxy@c834f92, mPriority=0, mIsAnimationCallback=false}
+11-25 17:03:10.975  1074  1074 D CarrierSvcBindHelper: onPackageModified: app.photosjpeg.android
+11-25 17:03:11.028  2207  2313 E chromium: [ERROR:simple_file_enumerator.cc(21)] opendir /data/user/0/app.photosjpeg.android/cache/WebView/Default/HTTP Cache/Code Cache/js: No such file or directory (2)
+11-25 17:03:11.028  2207  2313 E chromium: [ERROR:simple_file_enumerator.cc(21)] opendir /data/user/0/app.photosjpeg.android/cache/WebView/Default/HTTP Cache/Code Cache/wasm: No such file or directory (2)
+11-25 17:03:11.037   902   902 I SafetyLabelChangedBroadcastReceiver: received broadcast packageName: app.photosjpeg.android, current user: UserHandle{0}, packageChangeEvent: NEW_INSTALL, intent user: UserHandle{0}
+11-25 17:03:11.151  1074  1272 D ImsResolver: maybeAddedImsService, packageName: app.photosjpeg.android
+11-25 17:03:11.447   549   574 W ziparchive: Unable to open '/data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.dm': No such file or directory
+11-25 17:03:11.470   549   574 I ActivityTaskManager: Displayed app.photosjpeg.android/.MainActivity for user 0: +2s480ms
+11-25 17:03:11.645   549   675 I ImeTracker: app.photosjpeg.android:3c9d909c: onRequestHide at ORIGIN_SERVER reason HIDE_UNSPECIFIED_WINDOW fromUser false
+11-25 17:03:11.646   549   675 I ImeTracker: app.photosjpeg.android:3c9d909c: onCancelled at PHASE_SERVER_SHOULD_HIDE
+11-25 17:03:11.659  1319  1319 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1986 onStartInput(EditorInfo{EditorInfo{packageName=app.photosjpeg.android, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=0, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, false)
+11-25 17:03:11.663   549  1394 W PackageConfigPersister: App-specific configuration not found for packageName: app.photosjpeg.android and userId: 0
+11-25 17:03:11.928   549   642 D CoreBackPreview: Window{d1ce9d3 u0 Splash Screen app.photosjpeg.android EXITING}: Setting back callback null
+11-25 17:03:11.938   549  1396 W InputManager-JNI: Input channel object 'd1ce9d3 Splash Screen app.photosjpeg.android (client)' was disposed without first being removed with the input manager!
+11-25 17:03:12.364  1145  1185 I Launcher.IconCache: Database bulk icon loading failed, using fallback bulk icon loading for: ComponentInfo{app.photosjpeg.android/app.photosjpeg.android.MainActivity}
+11-25 17:03:12.463  1214  2414 W FontLog : No resolver, short-circuit {Noto Color Emoji Compat, wdth 100.0, wght 400, ital 0.0, bestEffort false} for app.photosjpeg.android to failure [CONTEXT service_id=132 ]
+11-25 17:03:12.638  1214  2431 W FontLog : No resolver, short-circuit {Noto Color Emoji Compat, wdth 100.0, wght 400, ital 0.0, bestEffort false} for app.photosjpeg.android to failure [CONTEXT service_id=132 ]
+11-25 17:03:14.537   549   862 D ShortcutService: changing package: app.photosjpeg.android userId0
+11-25 17:03:14.537   549   862 D ShortcutService: handlePackageChanged: app.photosjpeg.android user=0
+11-25 17:03:14.537   549   862 D ShortcutService: rescanPackageIfNeeded 0@app.photosjpeg.android, forceRescan=true , isNewApp=true
+11-25 17:03:14.538   549   862 D ShortcutService: Package app.photosjpeg.android has 0 manifest shortcut(s), and 0 share target(s)
+11-25 17:03:15.925  1145  1153 W s.nexuslauncher: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:16.223  1145  1185 D SessionCommitReceiver: Removing PromiseIcon for package: app.photosjpeg.android, install reason: 0, alreadyAddedPromiseIcon: false
+11-25 17:03:16.311  2207  2765 D ProfileInstaller: Installing profile for app.photosjpeg.android
+11-25 17:03:16.779  1145  1185 D PackageUpdatedTask: Package updated: mOp=ADD packages=[app.photosjpeg.android]
+11-25 17:03:16.968  1319  1319 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1986 onStartInput(EditorInfo{EditorInfo{packageName=app.photosjpeg.android, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=0, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, true)
+11-25 17:03:16.974   549  1394 W PackageConfigPersister: App-specific configuration not found for packageName: app.photosjpeg.android and userId: 0
+11-25 17:03:16.978  1145  1185 D PackageUpdatedTask: Package updated: mOp=UPDATE packages=[app.photosjpeg.android]
+11-25 17:03:17.069  1420  1420 I AiAiEcho: AppFetcherImplV2 updateApps package:[app.photosjpeg.android], userId:[0], reason:[package is added.].
+11-25 17:03:17.667  1145  1153 W s.nexuslauncher: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:17.670  1420  1420 I AiAiEcho: AppFetcherImpl onPackageChanged app.photosjpeg.android.
+11-25 17:03:17.674  1420  2803 I AiAiEcho: AppIndexer Package:[app.photosjpeg.android] UserProfile:[0] Enabled:[true].
+11-25 17:03:17.674  1420  2803 I AiAiEcho: AppFetcherImplV2 updateApps package:[app.photosjpeg.android], userId:[0], reason:[package is updated.].
+11-25 17:03:22.416  1458  1464 W gle.android.gms: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:25.093  1458  3236 I Blockstore: [DataStoreImpl] Clearing Blockstore Data for package app.photosjpeg.android [CONTEXT service_id=258 ]
+11-25 17:03:25.288  1214  3315 I FontLog : Package app.photosjpeg.android has no metadata [CONTEXT service_id=132 ]
+11-25 17:03:26.150  1458  1464 W gle.android.gms: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:27.708  1458  1464 W gle.android.gms: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:29.560  1458  1464 W gle.android.gms: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references
+11-25 17:03:49.512   901   918 W ndroid.systemui: ApkAssets: Deleting an ApkAssets object '<empty> and /data/app/~~OeAlOFZzlbSyJ7Kjx79ouA==/app.photosjpeg.android-bkw4mL8I7G4-mY54dvYMSA==/base.apk' with 1 weak references

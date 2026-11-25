@@ -1,0 +1,2 @@
+    topResumedActivity=ActivityRecord{7e579ba u0 app.photosjpeg.android/.MainActivity t8}
+  ResumedActivity: ActivityRecord{7e579ba u0 app.photosjpeg.android/.MainActivity t8}

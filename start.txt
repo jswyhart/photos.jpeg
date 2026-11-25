@@ -1,0 +1,7 @@
+Starting: Intent { cmp=app.photosjpeg.android/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: app.photosjpeg.android/.MainActivity
+TotalTime: 2480
+WaitTime: 2533
+Complete
